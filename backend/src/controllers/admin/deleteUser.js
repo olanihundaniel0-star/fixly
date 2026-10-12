@@ -28,6 +28,7 @@ export const deleteUser = async (req, res) => {
     }
 
     // Cascade-delete the artisan profile if one exists.
+    //exception for artisan
     if (user.role === "artisan") {
       await Profile.deleteOne({ user_id: id });
     }
