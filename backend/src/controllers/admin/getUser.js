@@ -23,9 +23,18 @@ export const fetchUser = async (req, res) => {
       });
     }
 
+    // Hide soft-deleted users unless explicitly requested.
+    if (user.isDeleted && req.query.includeDeleted !== "true") {
+      return res.status(404).json({
+        statusCode: 404,
+        success: false,
+        message: "User not found",
+      });
+    }
+
     let artisanProfile = null;
     if (user.role === "artisan") {
-      artisanProfile = await Profile.findOne({ user_id: id });
+      artisanProfile = await Profile.findOne({ user_id: id, isDeleted: { $ne: true } });
     }
 
     return res.status(200).json({

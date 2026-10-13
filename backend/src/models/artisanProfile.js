@@ -31,6 +31,8 @@ const profileSchema = new mongoose.Schema(
     starting_price: { type: Number, required: true, min: 0 },
     residential_address: { type: String, required: true, trim: true },
     office_address: { type: String, required: true, trim: true },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date, default: null },
   },
   {
     timestamps: true,

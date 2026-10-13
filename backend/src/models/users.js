@@ -18,6 +18,8 @@ const userSchema = new mongoose.Schema({
         enum: ["house_owner", "artisan", "admin"],
         default: "house_owner",
     },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date, default: null },
    
 },
 {

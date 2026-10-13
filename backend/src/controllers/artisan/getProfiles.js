@@ -19,7 +19,7 @@ export const getProfiles = async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
 
     if (req.query.profession) {
       if (!PROFESSIONS.includes(req.query.profession)) {
@@ -79,6 +79,15 @@ export const getProfileById = async (req, res) => {
       .populate("user_id", "firstName lastName role");
 
     if (!profile) {
+      return res.status(404).json({
+        statusCode: 404,
+        success: false,
+        message: "Artisan profile not found",
+      });
+    }
+
+    // Hide soft-deleted profiles from public reads.
+    if (profile.isDeleted) {
       return res.status(404).json({
         statusCode: 404,
         success: false,

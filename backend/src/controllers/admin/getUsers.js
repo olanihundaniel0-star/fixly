@@ -7,9 +7,15 @@ export const fetchUsers = async (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const skip = (page - 1) * limit;
 
+    // Hide soft-deleted users unless explicitly requested.
+    const filter = {};
+    if (req.query.includeDeleted !== "true") {
+      filter.isDeleted = { $ne: true };
+    }
+
     const [users, total] = await Promise.all([
-      User.find().select("-password").sort({ createdAt: -1 }).skip(skip).limit(limit),
-      User.countDocuments(),
+      User.find(filter).select("-password").sort({ createdAt: -1 }).skip(skip).limit(limit),
+      User.countDocuments(filter),
     ]);
 
     return res.status(200).json({
