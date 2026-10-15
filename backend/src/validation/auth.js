@@ -24,6 +24,10 @@ const registerValidationSchema = Joi.object({
     }),
 });
 
+const loginValidationSchema = Joi.object({
+  email: Joi.string().trim().lowercase().email().required(),
+  password: Joi.string().required(),
+});
 const PROFESSIONS = [
   "Carpenter",
   "Plumber",
@@ -80,4 +84,4 @@ const profileUpdateSchema = Joi.object({
   .min(1)
   .messages({ "object.min": "Provide at least one field to update" });
 
-export { registerValidationSchema, profileCreateSchema, profileUpdateSchema };
+export { registerValidationSchema, loginValidationSchema, profileCreateSchema, profileUpdateSchema };

@@ -1,5 +1,6 @@
 import {
   registerValidationSchema,
+  loginValidationSchema,
   profileCreateSchema,
   profileUpdateSchema,
 } from "../validation/auth.js";
@@ -27,5 +28,6 @@ const validate = (schema) => (req, res, next) => {
 };
 
 export const validateRegistration = validate(registerValidationSchema);
+export const validateLogin = validate(loginValidationSchema);
 export const validateProfileCreate = validate(profileCreateSchema);
 export const validateProfileUpdate = validate(profileUpdateSchema);
