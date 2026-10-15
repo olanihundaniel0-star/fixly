@@ -170,3 +170,6 @@ export const restoreUser = async (req, res) => {
     return handleMongooseError(res, error);
   }
 };
+
+
+// test hard delete later

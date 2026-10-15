@@ -11,4 +11,4 @@ router.get("/profiles", getProfiles)
 router.get("/profile/:id", getProfileById)
 router.patch("/profile/:id", validateProfileUpdate, updateProfile)
 
-export default router
+export default router 
