@@ -13,6 +13,8 @@ User (src/models/users.js):
 - email: string, required, unique, valid email
 - password: string, required, min 10 chars, lowercase + uppercase + digit, max 100
 - role: string, required, house_owner (default), artisan, admin
+- isDeleted: boolean, default false, indexed (soft-delete flag)
+- deletedAt: Date, default null (soft-delete timestamp)
 - timestamps: createdAt, updatedAt
 
 ArtisanProfile (src/models/artisanProfile.js):
@@ -20,25 +22,31 @@ ArtisanProfile (src/models/artisanProfile.js):
 - professional_headline: string, required
 - profession: string, required, Carpenter, Plumber, Welder, Brick Layer, Electrician, Auto Mechanic, Painter, Others
 - experience_years: number, required
-- rating: array of numbers, optional, create only
+- rating: array of numbers, optional, create only (immutable on update)
 - phone_number: string, required
 - starting_price: number, required
 - residential_address: string, required
 - office_address: string, required
+- isDeleted: boolean, default false, indexed (soft-delete flag)
+- deletedAt: Date, default null (soft-delete timestamp)
 - timestamps: createdAt, updatedAt
 
 ## Endpoints
 
 - GET / - Welcome message. Public.
-- POST /api/v1/auth/register - Register. Body: firstName, lastName, email, password, confirmPassword, role (optional, defaults to house_owner). Public.
-- POST /api/v1/artisan/profile - Create profile. Body: user_id, professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address, rating (optional). Artisan only.
-- PATCH /api/v1/artisan/profile/:id - Update profile by profile _id (partial or full). Body: any of professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address. Artisan owner, admin.
-- GET /api/v1/artisan/profiles - List all artisan profiles (phone/address excluded, user populated). Query: profession, search, page, limit, sortBy, order. Public.
-- GET /api/v1/artisan/profile/:id - Get one profile by profile _id (phone/address excluded). Public.
-- GET /api/v1/admin/users - List all users (password excluded). Admin only.
-- GET /api/v1/admin/user/:id - Get one user by user _id, includes artisanProfile for artisans. Admin only.
-- PATCH /api/v1/admin/user/:id - Update any user by user _id. Allowed: firstName, lastName, role. Admin only.
-- PATCH /api/v1/users/:id - Update own name by user _id. Allowed: firstName, lastName. Any logged in user (self).
+- POST /api/v1/auth/register - Register. Body: firstName, lastName, email, password, confirmPassword, role (optional, defaults to house_owner). Public. 201 on success, 400 validation, 409 duplicate email.
+- POST /api/v1/artisan/profile - Create profile. Body: user_id, professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address, rating (optional). Artisan only (user.role must be artisan). 201 on success, 400 invalid user_id, 403 non-artisan, 404 user not found, 409 profile exists.
+- PATCH /api/v1/artisan/profile/:id - Update profile by profile _id (partial or full). Body: any of professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address. Immutable: user_id, rating, _id, __v (400 if sent). Empty strings rejected. Artisan owner, admin. 200 on success, 400 invalid id / empty body, 404 not found.
+- GET /api/v1/artisan/profiles - List all artisan profiles (phone/address excluded, user populated with firstName, lastName, role). Soft-deleted excluded. Query: profession (must be valid enum), search (matches professional_headline, profession, case-insensitive), page (default 1), limit (default 20, max 100), sortBy (createdAt, experience_years, starting_price; default createdAt), order (asc else desc). Returns data + meta { total, page, limit, totalPages }. Public. 400 invalid profession.
+- GET /api/v1/artisan/profile/:id - Get one profile by profile _id (phone/address excluded, user populated). Returns 404 if missing or soft-deleted. Public.
+- GET /api/v1/admin/users - List all users (password excluded, sorted createdAt desc). Query: page (default 1), limit (default 20, max 100), includeDeleted=true to show soft-deleted (default hides them). Returns data + meta { total, page, limit, totalPages }. Admin only.
+- GET /api/v1/admin/user/:id - Get one user by user _id, includes artisanProfile for artisans (non-deleted only). Query: includeDeleted=true to view soft-deleted (default hides them with 404). Returns { id, firstName, lastName, email, role, createdAt, updatedAt, artisanProfile }. 400 invalid id, 404 not found. Admin only.
+- PATCH /api/v1/admin/user/:id - Update any user by user _id. Allowed: firstName, lastName, role. 400 invalid id / empty body / no allowed fields, 404 not found. Admin only.
+- PATCH /api/v1/admin/user/:id/soft-delete - Soft-delete user by user _id. Sets isDeleted=true, deletedAt=now on user and its artisan profile (if role is artisan). Idempotent: returns 200 "User already soft-deleted" if already flagged. 400 invalid id, 404 not found. Admin only.
+- PATCH /api/v1/admin/user/:id/restore - Restore soft-deleted user by user _id. Clears isDeleted/deletedAt on user and its artisan profile (if role is artisan). Idempotent: returns 200 "User is not soft-deleted" if not flagged. 400 invalid id, 404 not found. Admin only.
+- DELETE /api/v1/admin/user/:id - Hard-delete (permanent) user by user _id. Cascade-deletes artisan profile via Profile.deleteOne({ user_id }) if role is artisan, then User.deleteOne. Returns { id }. 400 invalid id, 404 not found. Admin only.
+- PATCH /api/v1/users/:id - Update own name by user _id. Allowed: firstName, lastName. 400 invalid id / empty body / no allowed fields, 404 not found. Any logged in user (self).
+- All unmatched routes - 404 { statusCode: 404, success: false, message: "Route not found" }.
 
 ## DB Snapshot (fixly-backend @ 2026-10-12, passwords omitted)
 
