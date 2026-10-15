@@ -13,10 +13,12 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "http-status": "^2.1.0",
     "joi": "^18.2.9",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.1",
     "morgan": "^1.12.0"
   },
