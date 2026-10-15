@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import User from "../../models/users.js";
+import { generateToken } from "../../utils/jwt.js";
 
 export const login = async (req, res) => {
     try {
@@ -35,15 +35,8 @@ export const login = async (req, res) => {
             });
         }
 
-        //step 4: issue JWT if secret is configured
-        let token = null;
-        if (process.env.JWT_SECRET) {
-            token = jwt.sign(
-                { id: user._id, role: user.role },
-                process.env.JWT_SECRET,
-                { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
-            );
-        }
+        //step 4: issue JWT (null if JWT_SECRET not configured)
+        const token = generateToken(user);
 
         //step 5: send response (never return password hash)
         return res.status(200).json({

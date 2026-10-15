@@ -23,11 +23,13 @@ const registerValidationSchema = Joi.object({
       "any.only": "Role must be either house_owner, Artisan or Admin",
     }),
 });
-
+// adding fields as required 
 const loginValidationSchema = Joi.object({
   email: Joi.string().trim().lowercase().email().required(),
   password: Joi.string().required(),
 });
+
+// 
 const PROFESSIONS = [
   "Carpenter",
   "Plumber",
