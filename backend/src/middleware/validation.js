@@ -2,7 +2,7 @@ import {
   registerValidationSchema,
   profileCreateSchema,
   profileUpdateSchema,
-} from "../src/validation/auth.js";
+} from "../validation/auth.js";
 
 const formatJoiError = (error) =>
   error.details.map((d) => d.message);

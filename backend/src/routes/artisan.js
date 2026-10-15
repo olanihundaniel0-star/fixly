@@ -2,7 +2,7 @@ import express from "express"
 import { createProfile } from "../controllers/artisan/profile.js"
 import { getProfileById, getProfiles } from "../controllers/artisan/getProfiles.js"
 import { updateProfile } from "../controllers/artisan/updateProfile.js"
-import { validateProfileCreate, validateProfileUpdate } from "../../middleware/validation.js"
+import { validateProfileCreate, validateProfileUpdate } from "../middleware/validation.js"
 
 const router = express.Router()
 

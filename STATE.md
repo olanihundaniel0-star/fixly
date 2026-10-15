@@ -13,6 +13,7 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - [x] Artisan profile creation, update, and search/listing endpoints
 - [x] Admin endpoints for user retrieval and update
 - [x] Admin endpoints for user hard deletion, soft deletion, and restoration
+- [x] Fixed middleware import paths following relocation to `src/middleware/`
 
 ## What Is Next
 - [ ] Implement password hashing (bcrypt/argon2) during user registration
