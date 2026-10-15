@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import User from "../../models/users.js";
 import { handleMongooseError, isDuplicateKey } from "../../utils/errors.js";
 
@@ -15,12 +16,14 @@ export const register = async (req, res) => {
             });
         }
 
-        //step3: create user
+        //step3: salt + hash password and create user
+        const salt = await bcrypt.genSalt(12);
+        const hashedPassword = await bcrypt.hash(password, salt);
         let user = await User.create({
             firstName,
             lastName,
             email,
-            password,
+            password: hashedPassword,
             role,
         });
 
