@@ -82,6 +82,18 @@ const profileUpdateSchema = Joi.object({
   starting_price: Joi.number().min(0),
   residential_address: Joi.string().trim().min(3),
   office_address: Joi.string().trim().min(3),
+  user_id: Joi.any().forbidden().messages({
+    "any.unknown": "user_id cannot be updated",
+  }),
+  rating: Joi.any().forbidden().messages({
+    "any.unknown": "rating cannot be updated",
+  }),
+  _id: Joi.any().forbidden().messages({
+    "any.unknown": "_id cannot be updated",
+  }),
+  __v: Joi.any().forbidden().messages({
+    "any.unknown": "__v cannot be updated",
+  }),
 })
   .min(1)
   .messages({ "object.min": "Provide at least one field to update" });
