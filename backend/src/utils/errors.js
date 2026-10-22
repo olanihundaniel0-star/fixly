@@ -4,6 +4,8 @@ export const isValidationError = (error) => error?.name === "ValidationError";
 
 export const isCastError = (error) => error?.name === "CastError";
 
+const isProduction = () => process.env.NODE_ENV === "production";
+
 export const handleMongooseError = (res, error) => {
   if (isDuplicateKey(error)) {
     return res.status(409).json({
@@ -23,6 +25,6 @@ export const handleMongooseError = (res, error) => {
     statusCode: 500,
     success: false,
     message: "Internal Server Error",
-    error: error.message,
+    ...(isProduction() ? {} : { error: error.message }),
   });
 };

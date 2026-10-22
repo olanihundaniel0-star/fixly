@@ -35,7 +35,7 @@ export const login = async (req, res) => {
             });
         }
 
-        //step 4: issue JWT (null if JWT_SECRET not configured)
+        //step 4: issue JWT
         const token = generateToken(user);
 
         //step 5: send response (never return password hash)
@@ -49,7 +49,7 @@ export const login = async (req, res) => {
                 lastName: user.lastName,
                 email: user.email,
                 role: user.role,
-                ...(token ? { token } : {}),
+                token,
             },
         });
     } catch (error) {

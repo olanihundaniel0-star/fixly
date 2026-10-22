@@ -66,7 +66,7 @@ export const updateProfile = async (req, res) => {
     }
 
     const profile = await Profile.findById(id);
-    if (!profile) {
+    if (!profile || profile.isDeleted) {
       return res.status(404).json({
         statusCode: 404,
         success: false,

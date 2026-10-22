@@ -1,11 +1,13 @@
 import User from "../../models/users.js";
 import { handleMongooseError } from "../../utils/errors.js";
+import {
+  parsePagination,
+  paginationMeta,
+} from "../../utils/pagination.js";
 
 export const fetchUsers = async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
+    const { limit, page, skip } = parsePagination(req.query);
 
     // Hide soft-deleted users unless explicitly requested.
     const filter = {};
@@ -23,7 +25,7 @@ export const fetchUsers = async (req, res) => {
       success: true,
       message: "Users retrieved Successfully",
       data: users,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
+      meta: paginationMeta(total, page, limit),
     });
   } catch (e) {
     return handleMongooseError(res, e);

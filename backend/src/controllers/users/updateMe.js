@@ -6,7 +6,6 @@ const ALLOWED_FIELDS = ["firstName", "lastName"];
 
 // PATCH /api/v1/users/:id — self-service update for any role.
 // Email/password/role changes are rejected here (dedicated endpoints later).
-// TODO: switch to /me via req.user.id once JWT auth lands.
 export const updateMe = async (req, res) => {
   try {
     const { id } = req.params;

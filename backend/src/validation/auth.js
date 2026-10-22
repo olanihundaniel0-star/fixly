@@ -1,4 +1,5 @@
 import Joi from "joi";
+import { PROFESSIONS } from "../constants/professions.js";
 
 const registerValidationSchema = Joi.object({
   firstName: Joi.string().trim().required().messages({
@@ -7,7 +8,7 @@ const registerValidationSchema = Joi.object({
     "any.required": "First Name is required",
   }),
   lastName: Joi.string().trim().required(),
-  email: Joi.string().trim().lowercase().email().required(),
+  email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
   password: Joi.string()
     .min(10)
     .max(100)
@@ -25,22 +26,11 @@ const registerValidationSchema = Joi.object({
 });
 // adding fields as required 
 const loginValidationSchema = Joi.object({
-  email: Joi.string().trim().lowercase().email().required(),
+  email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
   password: Joi.string().required(),
 });
 
-// 
-const PROFESSIONS = [
-  "Carpenter",
-  "Plumber",
-  "Welder",
-  "Brick Layer",
-  "Electrician",
-  "Auto Mechanic",
-  "Painter",
-  "Others",
-];
-
+//
 const profileCreateSchema = Joi.object({
   user_id: Joi.string().hex().length(24).required().messages({
     "string.length": "user_id must be a valid ObjectId",

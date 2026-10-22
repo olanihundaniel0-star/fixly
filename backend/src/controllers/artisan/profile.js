@@ -30,7 +30,7 @@ export const createProfile = async (req, res) => {
     const user = await User.findById(user_id);
 
     // 3. Check if user exists
-    if (!user) {
+    if (!user || user.isDeleted) {
       return res.status(404).json({
         statusCode: 404,
         success: false,

@@ -5,7 +5,6 @@ import { handleMongooseError } from "../../utils/errors.js";
 const ALLOWED_FIELDS = ["firstName", "lastName", "role"];
 
 // PATCH /api/v1/admin/user/:id — admin edits any user.
-// TODO: guard with requireAuth + requireRole("admin") once auth lands.
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;

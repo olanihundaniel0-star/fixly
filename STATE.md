@@ -14,15 +14,21 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - [x] Admin endpoints for user retrieval and update
 - [x] Admin endpoints for user hard deletion, soft deletion, and restoration
 - [x] Fixed middleware import paths following relocation to `src/middleware/`
+- [x] Password hashing (bcrypt, salt 12) during user registration
+- [x] Authentication (JWT) and RBAC authorization middleware for admin and user-specific endpoints
+- [x] Sanitized search regex input in artisan profile queries (ReDoS/injection fixed)
+- [x] Automated test suite (node:test + supertest, `npm test`, separate test DB)
+- [x] Security middleware: helmet, cors (CLIENT_ORIGIN allowlist), express-rate-limit on /api/v1 and stricter on /api/v1/auth
+- [x] JWT startup guard (refuses to start without JWT_SECRET), role dropped from token payload
+- [x] Soft-deleted profiles/users blocked from update + profile creation (`isDeleted` checks)
+- [x] Shared pagination util, shared PROFESSIONS constant, prod-safe error responses
 
 ## What Is Next
-- [ ] Implement password hashing (bcrypt/argon2) during user registration
-- [ ] Prevent self-registration of `admin` roles in registration schema
-- [ ] Implement authentication (JWT) and RBAC authorization middleware for admin and user-specific endpoints
-- [ ] Sanitize search regex input in artisan profile queries to prevent ReDoS/syntax crashes
+- [ ] Prevent self-registration of `admin` roles in registration schema (deferred; known critical)
+- [ ] Reject trusting `user_id` from request body in artisan profile creation (deferred; known critical — use `req.user._id`)
 - [ ] Fix soft-delete edge cases (MongoDB partial unique index on email/user_id, atomic transactions on cascade operations)
 - [ ] Return deletion metadata (`isDeleted`, `deletedAt`) in admin `getUser` endpoint and fetch matching profile state
-- [ ] Set up automated test suite (Jest / Supertest)
+- [ ] `braces` dev-only advisory via nodemon has no upstream fix; revisit when fixed
 
 ## Known Gotchas & Constraints
 - `Profile.updateProfile` validation is partially eclipsed by Joi middleware stripping unknown keys.

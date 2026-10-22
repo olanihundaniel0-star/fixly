@@ -1,23 +1,17 @@
+import mongoose from "mongoose";
 import Profile from "../../models/artisanProfile.js";
+import { PROFESSIONS } from "../../constants/professions.js";
 import { handleMongooseError } from "../../utils/errors.js";
+import {
+  parsePagination,
+  paginationMeta,
+} from "../../utils/pagination.js";
 
-const PROFESSIONS = [
-  "Carpenter",
-  "Plumber",
-  "Welder",
-  "Brick Layer",
-  "Electrician",
-  "Auto Mechanic",
-  "Painter",
-  "Others",
-];
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// GET /api/v1/artisan/profiles?profession=&search=&page=&limit=&sort=
 export const getProfiles = async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
-    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const skip = (page - 1) * limit;
+    const { limit, page, skip } = parsePagination(req.query);
 
     const filter = { isDeleted: { $ne: true } };
 
@@ -33,7 +27,7 @@ export const getProfiles = async (req, res) => {
     }
 
     if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search.trim(), "i");
+      const searchRegex = new RegExp(escapeRegExp(req.query.search.trim()), "i");
       filter.$or = [
         { professional_headline: searchRegex },
         { profession: searchRegex },
@@ -62,32 +56,29 @@ export const getProfiles = async (req, res) => {
       success: true,
       message: "Artisan profiles retrieved successfully",
       data: profiles,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
+      meta: paginationMeta(total, page, limit),
     });
   } catch (error) {
     return handleMongooseError(res, error);
   }
 };
 
-// GET /api/v1/artisan/profile/:id — single profile by profile _id
 export const getProfileById = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        statusCode: 400,
+        success: false,
+        message: "You must provide a valid id parameter",
+      });
+    }
 
     const profile = await Profile.findById(id)
       .select("-phone_number -residential_address -office_address -__v")
       .populate("user_id", "firstName lastName role");
 
-    if (!profile) {
-      return res.status(404).json({
-        statusCode: 404,
-        success: false,
-        message: "Artisan profile not found",
-      });
-    }
-
-    // Hide soft-deleted profiles from public reads.
-    if (profile.isDeleted) {
+    if (!profile || profile.isDeleted) {
       return res.status(404).json({
         statusCode: 404,
         success: false,

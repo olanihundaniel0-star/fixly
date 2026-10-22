@@ -5,7 +5,6 @@ import { handleMongooseError } from "../../utils/errors.js";
 
 // DELETE /api/v1/admin/user/:id — admin hard-deletes any user (permanent).
 // Removes the user doc and its artisan profile from the DB.
-// TODO: guard with requireAuth + requireRole("admin") once auth lands.
 export const deleteUser = async (req, res) => {
   try {
     // Validate the id param before hitting the DB.
@@ -51,7 +50,6 @@ export const deleteUser = async (req, res) => {
 
 // PATCH /api/v1/admin/user/:id/soft-delete — admin soft-deletes any user.
 // Flags isDeleted + deletedAt instead of removing the doc, so it can be restored.
-// TODO: guard with requireAuth + requireRole("admin") once auth lands.
 export const softDeleteUser = async (req, res) => {
   try {
     // Validate the id param before hitting the DB.
@@ -112,7 +110,6 @@ export const softDeleteUser = async (req, res) => {
 
 // PATCH /api/v1/admin/user/:id/restore — admin restores a soft-deleted user.
 // Clears isDeleted + deletedAt on the user and its artisan profile.
-// TODO: guard with requireAuth + requireRole("admin") once auth lands.
 export const restoreUser = async (req, res) => {
   try {
     // Validate the id param before hitting the DB.

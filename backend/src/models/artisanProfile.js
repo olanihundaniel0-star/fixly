@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { PROFESSIONS } from "../constants/professions.js";
 
 const profileSchema = new mongoose.Schema(
   {
@@ -14,16 +15,7 @@ const profileSchema = new mongoose.Schema(
       type: String,
       required: true,
       index: true,
-      enum: [
-        "Carpenter",
-        "Plumber",
-        "Welder",
-        "Brick Layer",
-        "Electrician",
-        "Auto Mechanic",
-        "Painter",
-        "Others",
-      ],
+      enum: PROFESSIONS,
     },
     experience_years: { type: Number, required: true, min: 0 },
     rating: { type: [Number], default: [] },
@@ -36,6 +28,8 @@ const profileSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true, versionKey: false },
+    toObject: { virtuals: true, versionKey: false },
   },
 );
 

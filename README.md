@@ -43,10 +43,14 @@ Update `backend/.env` with your MongoDB connection string and a long, random JWT
 
 ```env
 PORT=5000
+NODE_ENV=development
 MONGODB_URI=mongodb://127.0.0.1:27017/fixly-backend
 JWT_SECRET=replace-with-long-random-secret
 JWT_EXPIRES_IN=1d
+CLIENT_ORIGIN=http://localhost:5173
 ```
+
+`CLIENT_ORIGIN` is the comma-separated list of browser origins allowed to call the API (e.g. your Vite dev server). Leave it empty to block cross-origin browser requests.
 
 Start the development server:
 
@@ -55,6 +59,20 @@ npm run dev
 ```
 
 The API runs at `http://localhost:5000` by default. Use `npm start` to run it without automatic restarts.
+
+### Security middleware
+
+The API ships with `helmet` (security headers), `cors` (origin gating via `CLIENT_ORIGIN`), and `express-rate-limit` (a general limiter on `/api/v1` plus a stricter one on `/api/v1/auth`; see `AUTH_RATE_LIMIT_MAX` / `API_RATE_LIMIT_MAX` in `.env.example`). The server refuses to start without `JWT_SECRET`.
+
+### Tests
+
+From `backend`:
+
+```bash
+npm test
+```
+
+The suite (`backend/tests/`) runs with Node's built-in test runner and Supertest against a dedicated `fixly-backend-test` database, so your dev data is untouched.
 
 ### Frontend
 
