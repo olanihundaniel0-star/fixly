@@ -372,4 +372,41 @@ describe("Fixly API", () => {
         .expect(404);
     });
   });
+
+  describe("uploads", () => {
+    const cloudinaryKeys = [
+      "CLOUDINARY_CLOUD_NAME",
+      "CLOUDINARY_API_KEY",
+      "CLOUDINARY_API_SECRET",
+    ];
+
+    it("requires authentication", async () => {
+      await request(app)
+        .post("/api/v1/uploads/image")
+        .field("any", "field")
+        .expect(401);
+    });
+
+    it("returns 503 while Cloudinary is not configured", async () => {
+      const token = (await login(`owner-${stamp}@fixly.test`)).body.data.token;
+      const saved = Object.fromEntries(
+        cloudinaryKeys.map((key) => [key, process.env[key]]),
+      );
+      cloudinaryKeys.forEach((key) => delete process.env[key]);
+      try {
+        await request(app)
+          .post("/api/v1/uploads/image")
+          .set(bearer(token))
+          .attach("image", Buffer.from("not a real image"), "test.jpg")
+          .expect(503)
+          .expect((r) =>
+            assert.match(r.body.message, /not configured/i),
+          );
+      } finally {
+        cloudinaryKeys.forEach((key) => {
+          if (saved[key]) process.env[key] = saved[key];
+        });
+      }
+    });
+  });
 });

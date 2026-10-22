@@ -23,6 +23,7 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - [x] Soft-deleted profiles/users blocked from update + profile creation (`isDeleted` checks)
 - [x] Shared pagination util, shared PROFESSIONS constant, prod-safe error responses
 - [x] Upload toolchain installed: multer 2.5 + multer-storage-cloudinary 4 + cloudinary 2.11 (`backend/.npmrc` pins legacy-peer-deps since MSC still declares peer cloudinary ^1; runtime-compatible with v2 — only uses `uploader.upload_stream`/`destroy`)
+- [x] Cloudinary config + multer middleware + `POST /api/v1/uploads/image` (Bearer, image-only, 5MB cap, 503 when unconfigured, JSON error mapping)
 
 ## What Is Next
 - [ ] Prevent self-registration of `admin` roles in registration schema (deferred; known critical)

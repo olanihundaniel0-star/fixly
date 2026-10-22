@@ -94,5 +94,10 @@ Open the local URL printed by Vite. To create a production build, run `npm run b
 | `/api/v1/artisan` | Create, browse, and update artisan profiles |
 | `/api/v1/users` | Update your user account |
 | `/api/v1/admin` | Manage users as an administrator |
+| `/api/v1/uploads` | Upload images to Cloudinary (auth required) |
 
 Protected endpoints require an `Authorization: Bearer <token>` header.
+
+### Image uploads
+
+Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env` to enable uploads. While they are missing, upload endpoints respond with `503`. Accepted format: `POST /api/v1/uploads/image` as `multipart/form-data` with an `image` field (JPEG/PNG/WEBP, up to 5MB); the response returns the Cloudinary `url` and `publicId`.

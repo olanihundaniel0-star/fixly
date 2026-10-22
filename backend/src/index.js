@@ -4,11 +4,14 @@ import helmet from "helmet";
 import cors from "cors";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import multer from "multer";
 import { connectDB } from "./config/dbConnection.js";
+import { configureCloudinary } from "./config/cloudinary.js";
 import authRoutes from "./routes/auth.js";
 import artisanRoutes from "./routes/artisan.js";
 import adminRoutes from "./routes/admin.js";
 import usersRoutes from "./routes/users.js";
+import uploadsRoutes from "./routes/uploads.js";
 
 dotenv.config();
 
@@ -47,12 +50,41 @@ app.use("/api/v1/auth", authLimiter, authRoutes);
 app.use("/api/v1/artisan", artisanRoutes)
 app.use("/api/v1/admin", adminRoutes)
 app.use("/api/v1/users", usersRoutes)
+app.use("/api/v1/uploads", uploadsRoutes)
 
 app.use((req, res) => {
     return res.status(404).json({
         statusCode: 404,
         success: false,
         message: "Route not found",
+    });
+});
+
+app.use((error, req, res, next) => {
+    if (error instanceof multer.MulterError) {
+        const status = error.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+        const message = status === 413 ? "File is too large (max 5MB)" : error.message;
+        return res.status(status).json({
+            statusCode: status,
+            success: false,
+            message,
+        });
+    }
+    if (error.http_code) {
+        return res.status(error.http_code < 500 ? 400 : 500).json({
+            statusCode: error.http_code < 500 ? 400 : 500,
+            success: false,
+            message: "Image upload failed",
+        });
+    }
+    const status = error.statusCode || 500;
+    if (status >= 500) {
+        console.error(`Unhandled error: ${error.message}`);
+    }
+    return res.status(status).json({
+        statusCode: status,
+        success: false,
+        message: status === 500 ? "Internal Server Error" : error.message,
     });
 });
 
@@ -68,6 +100,9 @@ const start = async () => {
         process.exit(1);
     }
     await connectDB(); // Connect to MongoDB before accepting traffic
+    if (!configureCloudinary()) {
+        console.warn("Cloudinary not configured - upload endpoints will return 503");
+    }
     app.listen(PORT, () => {
         console.log(`Server is running on ${PORT}`);
     });
