@@ -32,9 +32,8 @@ const loginValidationSchema = Joi.object({
 
 //
 const profileCreateSchema = Joi.object({
-  user_id: Joi.string().hex().length(24).required().messages({
-    "string.length": "user_id must be a valid ObjectId",
-    "any.required": "user_id is required",
+  user_id: Joi.any().forbidden().messages({
+    "any.unknown": "Profile ownership is determined by the authenticated user",
   }),
   professional_headline: Joi.string().trim().min(3).required().messages({
     "string.base": "Professional Headline must be a text",

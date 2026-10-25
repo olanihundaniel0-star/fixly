@@ -100,6 +100,8 @@ Protected endpoints require an `Authorization: Bearer <token>` header.
 
 Public registration accepts only `house_owner` and `artisan` roles. An existing administrator can promote a registered account through `PATCH /api/v1/admin/user/:id`; the first administrator must be provisioned by a trusted database operator.
 
+Profile creation uses the authenticated artisan as its owner. Omit `user_id` from the request body; supplying it returns `400`.
+
 ### Image uploads
 
 Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env` to enable uploads. While they are missing, upload endpoints respond with `503`. Accepted format: `POST /api/v1/uploads/image` as `multipart/form-data` with an `image` field (JPEG/PNG/WEBP, up to 5MB); the response returns the Cloudinary `url` and `publicId`.

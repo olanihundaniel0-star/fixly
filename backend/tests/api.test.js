@@ -213,13 +213,26 @@ describe("Fixly API", () => {
     });
 
     it("rejects profile creation for non-artisan users", async () => {
-      const user = await User.findOne({ email: `owner-${stamp}@fixly.test` });
+      const ownerToken = (await login(`owner-${stamp}@fixly.test`)).body.data.token;
       const res = await request(app)
         .post("/api/v1/artisan/profile")
-        .set(bearer(artisanToken))
-        .send({ user_id: user._id.toString(), professional_headline: "Home plumbing", profession: "Plumber", experience_years: 3, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .set(bearer(ownerToken))
+        .send({ professional_headline: "Home plumbing", profession: "Plumber", experience_years: 3, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
         .expect(403);
-      assert.match(res.body.message, /artisan/i);
+      assert.match(res.body.message, /permission/i);
+    });
+
+    it("rejects supplied ownership even when it names the caller", async () => {
+      const caller = await User.findOne({ email: `artisan-${stamp}@fixly.test` });
+      const other = await User.findOne({ email: `technician-${stamp}@fixly.test` });
+      for (const user of [caller, other]) {
+        await request(app)
+          .post("/api/v1/artisan/profile")
+          .set(bearer(artisanToken))
+          .send({ user_id: user._id.toString(), professional_headline: "Home plumbing", profession: "Plumber", experience_years: 3, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+          .expect(400);
+        assert.equal(await Profile.exists({ user_id: user._id }), null);
+      }
     });
 
     it("lets an artisan create their profile and prevents duplicates", async () => {
@@ -227,14 +240,15 @@ describe("Fixly API", () => {
       const res = await request(app)
         .post("/api/v1/artisan/profile")
         .set(bearer(artisanToken))
-        .send({ user_id: user._id.toString(), professional_headline: "Expert home plumbing", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .send({ professional_headline: "Expert home plumbing", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
         .expect(201);
       profileId = res.body.data.id;
+      assert.equal(res.body.data.user_id, user._id.toString());
       assert.equal(res.body.data.profession, "Plumber");
       await request(app)
         .post("/api/v1/artisan/profile")
         .set(bearer(artisanToken))
-        .send({ user_id: user._id.toString(), professional_headline: "Duplicate", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .send({ professional_headline: "Duplicate", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
         .expect(409);
     });
 
@@ -310,6 +324,17 @@ describe("Fixly API", () => {
         { _id: profileId },
         { isDeleted: false, deletedAt: null },
       );
+    });
+
+    it("creates only one profile when the owner sends concurrent requests", async () => {
+      const body = { professional_headline: "Expert electrical repairs", profession: "Electrician", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" };
+      const results = await Promise.all([1, 2].map(() => request(app)
+        .post("/api/v1/artisan/profile")
+        .set(bearer(technicianToken))
+        .send(body)));
+      assert.deepEqual(results.map((res) => res.status).sort(), [201, 409]);
+      const user = await User.findOne({ email: `technician-${stamp}@fixly.test` });
+      assert.equal(await Profile.countDocuments({ user_id: user._id }), 1);
     });
   });
 
