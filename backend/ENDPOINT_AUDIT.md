@@ -11,7 +11,7 @@ Protected routes require:
 Authorization: Bearer <token>
 ```
 
-Tokens are issued by POST /api/v1/auth/login. The JWT payload is `{ id, role }` and expires after `JWT_EXPIRES_IN` (default `1d`). If `JWT_SECRET` is not configured, login succeeds without a token.
+Tokens are issued by POST /api/v1/auth/login. The JWT payload contains the user id plus standard timestamps; roles are loaded from the database on authenticated requests. Tokens expire after `JWT_EXPIRES_IN` (default `1d`). The server refuses to start without `JWT_SECRET`. Unexpected login failures return a generic 500 response without internal error details.
 
 Middleware (src/middleware/authentication.js):
 - requireAuth: Requires a valid Bearer token. Loads the user (password excluded), rejects missing/expired/invalid tokens and soft-deleted users with 401, then sets `req.user`.
