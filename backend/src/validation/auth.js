@@ -51,7 +51,9 @@ const profileCreateSchema = Joi.object({
     "number.min": "Experience years cannot be negative",
     "any.required": "Experience years is required",
   }),
-  rating: Joi.array().items(Joi.number().min(1).max(5)).optional(),
+  rating: Joi.any().forbidden().messages({
+    "any.unknown": "Ratings cannot be supplied when creating a profile",
+  }),
   phone_number: Joi.string().trim().min(7).required(),
   starting_price: Joi.number().min(0).required(),
   residential_address: Joi.string().trim().min(3).required(),

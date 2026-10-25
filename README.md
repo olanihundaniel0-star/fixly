@@ -101,6 +101,7 @@ Protected endpoints require an `Authorization: Bearer <token>` header.
 Public registration accepts only `house_owner` and `artisan` roles. An existing administrator can promote a registered account through `PATCH /api/v1/admin/user/:id`; the first administrator must be provisioned by a trusted database operator.
 
 Profile creation uses the authenticated artisan as its owner. Omit `user_id` from the request body; supplying it returns `400`.
+Ratings are initialized to an empty array by the server. Supplying `rating` when creating or updating a profile returns `400`.
 
 ### Image uploads
 

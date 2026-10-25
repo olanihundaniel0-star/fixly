@@ -235,6 +235,16 @@ describe("Fixly API", () => {
       }
     });
 
+    it("rejects self-assigned ratings without creating a profile", async () => {
+      const user = await User.findOne({ email: `artisan-${stamp}@fixly.test` });
+      await request(app)
+        .post("/api/v1/artisan/profile")
+        .set(bearer(artisanToken))
+        .send({ rating: [5, 5, 5], professional_headline: "Expert home plumbing", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .expect(400);
+      assert.equal(await Profile.exists({ user_id: user._id }), null);
+    });
+
     it("lets an artisan create their profile and prevents duplicates", async () => {
       const user = await User.findOne({ email: `artisan-${stamp}@fixly.test` });
       const res = await request(app)
@@ -244,6 +254,7 @@ describe("Fixly API", () => {
         .expect(201);
       profileId = res.body.data.id;
       assert.equal(res.body.data.user_id, user._id.toString());
+      assert.deepEqual(res.body.data.rating, []);
       assert.equal(res.body.data.profession, "Plumber");
       await request(app)
         .post("/api/v1/artisan/profile")
@@ -308,6 +319,17 @@ describe("Fixly API", () => {
         .send({ professional_headline: "Legendary plumber", starting_price: 7000 })
         .expect(200)
         .expect((r) => assert.equal(r.body.data.starting_price, 7000));
+    });
+
+    it("rejects rating updates without applying other changes", async () => {
+      await request(app)
+        .patch(`/api/v1/artisan/profile/${profileId}`)
+        .set(bearer(artisanToken))
+        .send({ rating: [5], starting_price: 1 })
+        .expect(400);
+      const profile = await Profile.findById(profileId);
+      assert.deepEqual(profile.rating.toObject(), []);
+      assert.equal(profile.starting_price, 7000);
     });
 
     it("rejects updates on soft-deleted profiles", async () => {

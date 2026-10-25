@@ -40,7 +40,7 @@ ArtisanProfile (src/models/artisanProfile.js):
 - professional_headline: string, required
 - profession: string, required, Carpenter, Plumber, Welder, Brick Layer, Electrician, Auto Mechanic, Painter, Others
 - experience_years: number, required
-- rating: array of numbers, optional, create only (immutable on update)
+- rating: array of numbers, initialized to [] by the server (forbidden on create and update)
 - phone_number: string, required
 - starting_price: number, required
 - residential_address: string, required
@@ -54,7 +54,7 @@ ArtisanProfile (src/models/artisanProfile.js):
 - GET / - Welcome message. Public.
 - POST /api/v1/auth/register - Register. Body: firstName, lastName, email, password, confirmPassword, role (optional, defaults to house_owner). Public. 201 on success, 400 validation, 409 duplicate email.
 - POST /api/v1/auth/login - Login. Body: email, password. Public. 200 on success with data { id, firstName, lastName, email, role, token }, 400 validation, 401 invalid credentials.
-- POST /api/v1/artisan/profile - Create profile owned by the authenticated artisan. Requires Bearer auth + artisan role. Body: professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address, rating (optional). Supplying user_id is rejected. 201 on success, 400 validation, 401 unauthenticated, 403 non-artisan, 404 user not found, 409 profile exists.
+- POST /api/v1/artisan/profile - Create profile owned by the authenticated artisan. Requires Bearer auth + artisan role. Body: professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address. Supplying user_id or rating is rejected. 201 on success, 400 validation, 401 unauthenticated, 403 non-artisan, 404 user not found, 409 profile exists.
 - PATCH /api/v1/artisan/profile/:id - Update profile by profile _id (partial or full). Requires Bearer auth; owner or admin. Body: any of professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address. Immutable: user_id, rating, _id, __v (400 if sent). Empty strings rejected. 200 on success, 400 invalid id / empty body, 401 unauthenticated, 403 non-owner, 404 not found.
 - GET /api/v1/artisan/profiles - List all artisan profiles (phone/address excluded, user populated with firstName, lastName, role). Soft-deleted excluded. Query: profession (must be valid enum), search (matches professional_headline, profession, case-insensitive), page (default 1), limit (default 20, max 100), sortBy (createdAt, experience_years, starting_price; default createdAt), order (asc else desc). Returns data + meta { total, page, limit, totalPages }. Public; optional auth populates req.user for valid tokens. 400 invalid profession.
 - GET /api/v1/artisan/profile/:id - Get one profile by profile _id (phone/address excluded, user populated). 400 invalid id, 404 if missing or soft-deleted. Public; optional auth populates req.user for valid tokens.
@@ -91,7 +91,7 @@ POST /api/v1/artisan/profile (Joi: profileCreateSchema):
 - starting_price: number >= 0, required
 - residential_address: string, trimmed, min 3 chars, required
 - office_address: string, trimmed, min 3 chars, required
-- rating: optional array of numbers between 1 and 5 (model default [])
+- rating: forbidden; new profiles use the model default []
 
 PATCH /api/v1/artisan/profile/:id (Joi: profileUpdateSchema):
 - At least one of: professional_headline (min 3), profession (valid enum), experience_years (>= 0), phone_number (min 7), starting_price (>= 0), residential_address (min 3), office_address (min 3)
