@@ -269,6 +269,20 @@ describe("avatar API", () => {
     assert.equal((await User.findById(user._id).select("+avatar.publicId")).avatar.publicId, "provider-error-current");
   });
 
+  it("reports provider authentication, rate limits, and outages as storage failures without exposing details", async (t) => {
+    const user = await createUser({ avatar: avatar("unavailable-storage-current") });
+    const error = { http_code: 401, message: "private provider authentication details" };
+    const storage = mockCloudinary(t, { uploadError: error });
+    for (const status of [401, 403, 408, 420, 429, 499, 500]) {
+      error.http_code = status;
+      const res = await putImage(user).expect(503);
+      assert.equal(res.body.message, "Image storage is unavailable. Please try again later.");
+      assert.doesNotMatch(JSON.stringify(res.body), /private provider/);
+    }
+    assert.equal(storage.destroyed.length, 0);
+    assert.equal((await User.findById(user._id).select("+avatar.publicId")).avatar.publicId, "unavailable-storage-current");
+  });
+
   it("discards the new upload and keeps the previous avatar when saving fails", async (t) => {
     const user = await createUser({ avatar: avatar("database-error-current") });
     const storage = mockCloudinary(t);
