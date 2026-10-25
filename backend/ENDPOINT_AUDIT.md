@@ -75,7 +75,7 @@ POST /api/v1/auth/register (Joi: registerValidationSchema):
 - email: string, trimmed, lowercased, valid email, required
 - password: string, required, 10-100 chars, must contain lowercase, uppercase and a digit
 - confirmPassword: must match password when provided
-- role: "house_owner" | "artisan" | "admin", default "house_owner"
+- role: "house_owner" | "artisan", default "house_owner"; public admin registration is rejected
 - Unknown fields are stripped.
 
 POST /api/v1/auth/login (Joi: loginValidationSchema):

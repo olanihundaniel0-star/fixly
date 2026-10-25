@@ -86,6 +86,18 @@ describe("Fixly API", () => {
     assert.ok(res.body.errors.length > 0);
   });
 
+  it("rejects public admin registration without creating an account", async () => {
+    const email = `public-admin-${stamp}@fixly.test`;
+    await register({
+      firstName: "Public",
+      lastName: "Admin",
+      email,
+      password: PASSWORD,
+      role: "admin",
+    }).expect(400);
+    assert.equal(await User.exists({ email }), null);
+  });
+
   it("rejects mismatched confirmPassword", async () => {
     const res = await register({
       firstName: "Mis",

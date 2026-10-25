@@ -18,10 +18,10 @@ const registerValidationSchema = Joi.object({
     "any.only": "Passwords do not match",
   }),
   role: Joi.string()
-    .valid("house_owner", "artisan", "admin")
+    .valid("house_owner", "artisan")
     .default("house_owner")
     .messages({
-      "any.only": "Role must be either house_owner, Artisan or Admin",
+      "any.only": "Role must be either house_owner or artisan",
     }),
 });
 // adding fields as required 
