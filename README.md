@@ -72,7 +72,7 @@ From `backend`:
 npm test
 ```
 
-The suite (`backend/tests/`) runs with Node's built-in test runner and Supertest against a dedicated `fixly-backend-test` database, so your dev data is untouched.
+The suite (`backend/tests/`) runs with Node's built-in test runner and Supertest. Each integration run creates a unique `fixly-test-<random-id>` database and only drops that database during cleanup. Set `MONGODB_URI_TEST` to select a test server; the database name in that URI is overridden. The default server is `mongodb://127.0.0.1:27017`.
 
 ### Frontend
 

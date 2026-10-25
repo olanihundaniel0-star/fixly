@@ -1,4 +1,12 @@
+import dotenv from "dotenv";
+import {
+  createTestDatabaseName,
+  cleanupTestDatabase,
+} from "./helpers/database.js";
+
+dotenv.config({ quiet: true });
 process.env.NODE_ENV = "test";
+process.env.JWT_SECRET = "fixly-integration-test-secret";
 process.env.MONGODB_URI_TEST ??= "mongodb://127.0.0.1:27017/fixly-backend-test";
 process.env.MONGODB_URI = process.env.MONGODB_URI_TEST;
 process.env.AUTH_RATE_LIMIT_MAX = "1000";
@@ -28,8 +36,19 @@ const bearer = (token) => ({ Authorization: `Bearer ${token}` });
 const jsonOf = (payload) =>
   JSON.parse(Buffer.from(payload.split(".")[1], "base64url").toString("utf8"));
 
-await mongoose.connect(process.env.MONGODB_URI);
-await mongoose.connection.dropDatabase();
+const testDatabaseName = createTestDatabaseName();
+after(async () => {
+  if (mongoose.connection.readyState !== 0) {
+    await cleanupTestDatabase(mongoose.connection, testDatabaseName);
+  }
+});
+
+await mongoose.connect(process.env.MONGODB_URI, {
+  dbName: testDatabaseName,
+  serverSelectionTimeoutMS: 5000,
+});
+assert.equal(mongoose.connection.name, testDatabaseName);
+await Promise.all([User.init(), Profile.init()]);
 
 const hashed = await bcrypt.hash("Admin#Pass123", await bcrypt.genSalt(4));
 const admin = await User.create({
@@ -38,11 +57,6 @@ const admin = await User.create({
   email: `admin-${stamp}@fixly.test`,
   password: hashed,
   role: "admin",
-});
-
-after(async () => {
-  await mongoose.connection.dropDatabase();
-  await mongoose.connection.close();
 });
 
 describe("Fixly API", () => {
