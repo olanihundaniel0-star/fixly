@@ -129,6 +129,40 @@ describe("Fixly API", () => {
     assert.equal(res.body.message, "Invalid email or password");
   });
 
+  it("hides database failure details in production login responses and logs", async (t) => {
+    const environment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    t.after(() => { process.env.NODE_ENV = environment; });
+    t.mock.method(User, "findOne", () => {
+      throw new Error("mongodb://private-user:private-password@internal-db");
+    });
+    const logger = t.mock.method(console, "error", () => {});
+    const res = await login(`owner-${stamp}@fixly.test`).expect(500);
+    assert.deepEqual(res.body, {
+      statusCode: 500,
+      success: false,
+      message: "Internal Server Error",
+    });
+    assert.equal(logger.mock.callCount(), 1);
+    assert.doesNotMatch(JSON.stringify(logger.mock.calls), /private-password/);
+  });
+
+  it("hides token generation errors from login responses", async (t) => {
+    const expiresIn = process.env.JWT_EXPIRES_IN;
+    process.env.JWT_EXPIRES_IN = "invalid-duration";
+    t.after(() => {
+      if (expiresIn === undefined) delete process.env.JWT_EXPIRES_IN;
+      else process.env.JWT_EXPIRES_IN = expiresIn;
+    });
+    t.mock.method(console, "error", () => {});
+    const res = await login(`owner-${stamp}@fixly.test`).expect(500);
+    assert.deepEqual(res.body, {
+      statusCode: 500,
+      success: false,
+      message: "Internal Server Error",
+    });
+  });
+
   it("sends rate-limit headers on auth responses", async () => {
     const res = await login(`owner-${stamp}@fixly.test`).expect(200);
     assert.ok(
