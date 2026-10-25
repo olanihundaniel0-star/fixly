@@ -3,40 +3,31 @@ import User from "../../models/users.js";
 import Profile from "../../models/artisanProfile.js";
 import { handleMongooseError } from "../../utils/errors.js";
 
-// DELETE /api/v1/admin/user/:id — admin hard-deletes any user (permanent).
-// Removes the user doc and its artisan profile from the DB.
+const validId = (id, res) => {
+  if (id && mongoose.Types.ObjectId.isValid(id)) return true;
+  res.status(400).json({
+    statusCode: 400,
+    success: false,
+    message: "You must provide a valid id parameter",
+  });
+  return false;
+};
+
+const notFound = (res) => res.status(404).json({
+  statusCode: 404,
+  success: false,
+  message: "User not found",
+});
+
 export const deleteUser = async (req, res) => {
   try {
-    // Validate the id param before hitting the DB.
     const { id } = req.params;
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        message: "You must provide a valid id parameter",
-      });
-    }
+    if (!validId(id, res)) return;
 
-    // Find first so we return 404 for missing users.
-    const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({
-        statusCode: 404,
-        success: false,
-        message: "User not found",
-      });
-    }
+    const user = await User.deleteOne({ _id: id });
+    const profile = await Profile.deleteOne({ user_id: id });
+    if (!user.deletedCount && !profile.deletedCount) return notFound(res);
 
-    // Cascade-delete the artisan profile if one exists.
-    //exception for artisan
-    if (user.role === "artisan") {
-      await Profile.deleteOne({ user_id: id });
-    }
-
-    // Delete the user itself.
-    await User.deleteOne({ _id: id });
-
-    // Confirm deletion with the removed id.
     return res.status(200).json({
       statusCode: 200,
       success: true,
@@ -48,59 +39,24 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-// PATCH /api/v1/admin/user/:id/soft-delete — admin soft-deletes any user.
-// Flags isDeleted + deletedAt instead of removing the doc, so it can be restored.
-export const softDeleteUser = async (req, res) => {
+const setDeletionState = (isDeleted) => async (req, res) => {
   try {
-    // Validate the id param before hitting the DB.
     const { id } = req.params;
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        message: "You must provide a valid id parameter",
-      });
-    }
+    if (!validId(id, res)) return;
 
-    // Find first so we return 404 for missing users.
     const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({
-        statusCode: 404,
-        success: false,
-        message: "User not found",
-      });
-    }
+    if (!user) return notFound(res);
 
-    // Short-circuit if already soft-deleted.
-    if (user.isDeleted) {
-      return res.status(200).json({
-        statusCode: 200,
-        success: true,
-        message: "User already soft-deleted",
-        data: { id },
-      });
-    }
+    const deletedAt = isDeleted ? (user.deletedAt || new Date()) : null;
+    const state = { isDeleted, deletedAt };
+    const updated = await User.updateOne({ _id: id }, state);
+    if (!updated.matchedCount) return notFound(res);
+    await Profile.updateOne({ user_id: id }, state);
 
-    // Soft-delete the artisan profile if one exists.
-    if (user.role === "artisan") {
-      await Profile.updateOne(
-        { user_id: id },
-        { isDeleted: true, deletedAt: new Date() },
-      );
-    }
-
-    // Flag the user itself.
-    await User.updateOne(
-      { _id: id },
-      { isDeleted: true, deletedAt: new Date() },
-    );
-
-    // Confirm soft-deletion with the flagged id.
     return res.status(200).json({
       statusCode: 200,
       success: true,
-      message: "User soft-deleted successfully",
+      message: isDeleted ? "User soft-deleted successfully" : "User restored successfully",
       data: { id },
     });
   } catch (error) {
@@ -108,65 +64,5 @@ export const softDeleteUser = async (req, res) => {
   }
 };
 
-// PATCH /api/v1/admin/user/:id/restore — admin restores a soft-deleted user.
-// Clears isDeleted + deletedAt on the user and its artisan profile.
-export const restoreUser = async (req, res) => {
-  try {
-    // Validate the id param before hitting the DB.
-    const { id } = req.params;
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        message: "You must provide a valid id parameter",
-      });
-    }
-
-    // Find first so we return 404 for missing users.
-    const user = await User.findById(id);
-    if (!user) {
-      return res.status(404).json({
-        statusCode: 404,
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    // Short-circuit if not soft-deleted.
-    if (!user.isDeleted) {
-      return res.status(200).json({
-        statusCode: 200,
-        success: true,
-        message: "User is not soft-deleted",
-        data: { id },
-      });
-    }
-
-    // Restore the artisan profile if one exists.
-    if (user.role === "artisan") {
-      await Profile.updateOne(
-        { user_id: id },
-        { isDeleted: false, deletedAt: null },
-      );
-    }
-
-    // Clear the flag on the user itself.
-    await User.updateOne(
-      { _id: id },
-      { isDeleted: false, deletedAt: null },
-    );
-
-    // Confirm restoration with the restored id.
-    return res.status(200).json({
-      statusCode: 200,
-      success: true,
-      message: "User restored successfully",
-      data: { id },
-    });
-  } catch (error) {
-    return handleMongooseError(res, error);
-  }
-};
-
-
-// test hard delete later
+export const softDeleteUser = setDeletionState(true);
+export const restoreUser = setDeletionState(false);

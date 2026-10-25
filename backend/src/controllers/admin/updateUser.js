@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import User from "../../models/users.js";
+import Profile from "../../models/artisanProfile.js";
 import { handleMongooseError } from "../../utils/errors.js";
 
 const ALLOWED_FIELDS = ["firstName", "lastName", "role"];
@@ -37,8 +38,29 @@ export const updateUser = async (req, res) => {
       });
     }
 
-    const user = await User.findByIdAndUpdate(id, updates, {
-      new: true,
+    const existing = await User.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!existing) {
+      return res.status(404).json({
+        statusCode: 404,
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (
+      updates.role !== undefined &&
+      updates.role !== "artisan" &&
+      await Profile.exists({ user_id: id })
+    ) {
+      return res.status(409).json({
+        statusCode: 409,
+        success: false,
+        message: "An account with an artisan profile must retain the artisan role",
+      });
+    }
+
+    const user = await User.findOneAndUpdate({ _id: id, isDeleted: { $ne: true } }, updates, {
+      returnDocument: "after",
       runValidators: true,
     }).select("-password");
 

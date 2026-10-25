@@ -399,6 +399,34 @@ describe("Fixly API", () => {
     let technicianToken;
     let technicianId;
 
+    const createArtisan = async (label) => {
+      const user = await User.create({
+        firstName: "Test",
+        lastName: "Artisan",
+        email: `${label}-${stamp}@fixly.test`,
+        password: hashed,
+        role: "artisan",
+      });
+      const profile = await Profile.create({
+        user_id: user._id,
+        professional_headline: "Lifecycle test artisan",
+        profession: "Plumber",
+        experience_years: 3,
+        phone_number: "08012345678",
+        starting_price: 5000,
+        residential_address: "12 Allen Ave",
+        office_address: "12 Allen Ave",
+      });
+      return { user, profile };
+    };
+
+    const assertHidden = async (profile) => {
+      await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(404);
+      const list = await request(app).get("/api/v1/artisan/profiles?limit=100").expect(200);
+      assert.ok(!list.body.data.some((item) => item.id === profile.id));
+      assert.equal(list.body.meta.total, list.body.data.length);
+    };
+
     it("requires admin role", async () => {
       adminToken = (await login(`admin-${stamp}@fixly.test`, "Admin#Pass123")).body.data.token;
       technicianToken = (await login(`technician-${stamp}@fixly.test`)).body.data.token;
@@ -421,6 +449,8 @@ describe("Fixly API", () => {
         .set(bearer(adminToken))
         .expect(200);
       assert.equal(res.body.data.email, `technician-${stamp}@fixly.test`);
+      assert.equal(res.body.data.artisanProfile.user_id, technicianId);
+      assert.equal(res.body.data.isDeleted, false);
     });
 
     it("updates a user as admin", async () => {
@@ -432,12 +462,66 @@ describe("Fixly API", () => {
         .expect((r) => assert.equal(r.body.data.firstName, "Roberta"));
     });
 
+    it("allows an existing admin to promote an account without a profile", async () => {
+      const user = await User.create({
+        firstName: "New",
+        lastName: "Admin",
+        email: `promoted-${stamp}@fixly.test`,
+        password: hashed,
+        role: "house_owner",
+      });
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(technicianToken))
+        .send({ role: "admin" })
+        .expect(403);
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .send({ role: "admin" })
+        .expect(200);
+      const token = (await login(user.email, "Admin#Pass123").expect(200)).body.data.token;
+      await request(app).get("/api/v1/admin/users").set(bearer(token)).expect(200);
+    });
+
+    it("rejects moving an account away from artisan while any profile exists", async () => {
+      for (const isDeleted of [false, true]) {
+        await Profile.updateOne({ user_id: technicianId }, { isDeleted });
+        for (const role of ["house_owner", "admin"]) {
+          await request(app)
+            .patch(`/api/v1/admin/user/${technicianId}`)
+            .set(bearer(adminToken))
+            .send({ role, firstName: "Must not change" })
+            .expect(409);
+        }
+        const user = await User.findById(technicianId);
+        assert.equal(user.role, "artisan");
+        assert.equal(user.firstName, "Roberta");
+      }
+      await Profile.updateOne({ user_id: technicianId }, { isDeleted: false });
+    });
+
     it("soft-deletes, hides, and restores a user", async () => {
       await request(app)
         .patch(`/api/v1/admin/user/${technicianId}/soft-delete`)
         .set(bearer(adminToken))
         .expect(200);
       await login(`technician-${stamp}@fixly.test`).expect(401);
+      const profile = await Profile.findOne({ user_id: technicianId });
+      assert.equal(profile.isDeleted, true);
+      await assertHidden(profile);
+      const details = await request(app)
+        .get(`/api/v1/admin/user/${technicianId}?includeDeleted=true`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal(details.body.data.isDeleted, true);
+      assert.equal(details.body.data.artisanProfile.isDeleted, true);
+      assert.equal(details.body.data.deletedAt, details.body.data.artisanProfile.deletedAt);
+      await request(app)
+        .patch(`/api/v1/admin/user/${technicianId}`)
+        .set(bearer(adminToken))
+        .send({ firstName: "Inactive update" })
+        .expect(404);
       const hidden = await request(app)
         .get("/api/v1/admin/users")
         .set(bearer(adminToken))
@@ -457,6 +541,108 @@ describe("Fixly API", () => {
         .set(bearer(adminToken))
         .expect(200);
       await login(`technician-${stamp}@fixly.test`).expect(200);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, false);
+      await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    });
+
+    it("cascades deletion and restoration for legacy role mismatches", async () => {
+      const { user, profile } = await createArtisan("legacy-role");
+      await User.updateOne({ _id: user._id }, { role: "house_owner" });
+      await assertHidden(profile);
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, true);
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/restore`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, false);
+      await assertHidden(profile);
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal(await Profile.findById(profile._id), null);
+    });
+
+    it("hides a deactivated owner immediately and repairs a failed soft-delete on retry", async (t) => {
+      const { user, profile } = await createArtisan("soft-delete-retry");
+      const fault = t.mock.method(Profile, "updateOne", async () => {
+        throw new Error("simulated profile write failure");
+      });
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+        .set(bearer(adminToken))
+        .expect(500);
+      fault.mock.restore();
+      assert.equal((await Profile.findById(profile._id)).isDeleted, false);
+      const deleted = await User.findById(user._id);
+      assert.equal(deleted.isDeleted, true);
+      await assertHidden(profile);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await request(app)
+          .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+          .set(bearer(adminToken))
+          .expect(200);
+      }
+      const repaired = await Profile.findById(profile._id);
+      assert.equal(repaired.isDeleted, true);
+      assert.equal(repaired.deletedAt.toISOString(), deleted.deletedAt.toISOString());
+    });
+
+    it("repairs a failed restore on retry", async (t) => {
+      const { user, profile } = await createArtisan("restore-retry");
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+        .set(bearer(adminToken))
+        .expect(200);
+      const fault = t.mock.method(Profile, "updateOne", async () => {
+        throw new Error("simulated profile write failure");
+      });
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/restore`)
+        .set(bearer(adminToken))
+        .expect(500);
+      fault.mock.restore();
+      assert.equal((await User.findById(user._id)).isDeleted, false);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, true);
+      await assertHidden(profile);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await request(app)
+          .patch(`/api/v1/admin/user/${user.id}/restore`)
+          .set(bearer(adminToken))
+          .expect(200);
+      }
+      const restored = await Profile.findById(profile._id);
+      assert.equal(restored.isDeleted, false);
+      assert.equal(restored.deletedAt, null);
+      await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    });
+
+    it("hides orphaned profiles and finishes hard deletion on retry", async (t) => {
+      const { user, profile } = await createArtisan("hard-delete-retry");
+      const fault = t.mock.method(Profile, "deleteOne", async () => {
+        throw new Error("simulated profile delete failure");
+      });
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(500);
+      fault.mock.restore();
+      assert.equal(await User.findById(user._id), null);
+      assert.notEqual(await Profile.findById(profile._id), null);
+      await assertHidden(profile);
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal(await Profile.findById(profile._id), null);
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(404);
     });
 
     it("hard-deletes a user and their profile for good", async () => {
@@ -469,6 +655,16 @@ describe("Fixly API", () => {
       }).expect(201);
       const doomed = await User.findOne({ email: `doomed-${stamp}@fixly.test` });
       const doomedId = doomed._id.toString();
+      const profile = await Profile.create({
+        user_id: doomed._id,
+        professional_headline: "Profile to cascade delete",
+        profession: "Plumber",
+        experience_years: 3,
+        phone_number: "08012345678",
+        starting_price: 5000,
+        residential_address: "12 Allen Ave",
+        office_address: "12 Allen Ave",
+      });
       await request(app)
         .delete(`/api/v1/admin/user/${doomedId}`)
         .set(bearer(adminToken))
@@ -477,6 +673,7 @@ describe("Fixly API", () => {
         .get(`/api/v1/admin/user/${doomedId}`)
         .set(bearer(adminToken))
         .expect(404);
+      assert.equal(await Profile.findById(profile._id), null);
     });
   });
 

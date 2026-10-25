@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Profile from "../../models/artisanProfile.js";
+import User from "../../models/users.js";
 import { PROFESSIONS } from "../../constants/professions.js";
 import { handleMongooseError } from "../../utils/errors.js";
 import {
@@ -41,15 +42,36 @@ export const getProfiles = async (req, res) => {
       : "createdAt";
     const sortOrder = req.query.order === "asc" ? 1 : -1;
 
-    const [profiles, total] = await Promise.all([
-      Profile.find(filter)
-        .select("-phone_number -residential_address -office_address -__v")
-        .populate("user_id", "firstName lastName role")
-        .sort({ [sortField]: sortOrder })
-        .skip(skip)
-        .limit(limit),
-      Profile.countDocuments(filter),
+    const [result] = await Profile.aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: User.collection.name,
+          localField: "user_id",
+          foreignField: "_id",
+          pipeline: [
+            { $match: { role: "artisan", isDeleted: { $ne: true } } },
+            { $project: { firstName: 1, lastName: 1, role: 1 } },
+          ],
+          as: "user_id",
+        },
+      },
+      { $unwind: "$user_id" },
+      {
+        $facet: {
+          profiles: [
+            { $sort: { [sortField]: sortOrder, _id: sortOrder } },
+            { $skip: skip },
+            { $limit: limit },
+            { $project: { phone_number: 0, residential_address: 0, office_address: 0, __v: 0 } },
+            { $set: { id: { $toString: "$_id" }, "user_id.id": { $toString: "$user_id._id" } } },
+          ],
+          total: [{ $count: "count" }],
+        },
+      },
     ]);
+    const profiles = result.profiles;
+    const total = result.total[0]?.count || 0;
 
     return res.status(200).json({
       statusCode: 200,
@@ -76,9 +98,13 @@ export const getProfileById = async (req, res) => {
 
     const profile = await Profile.findById(id)
       .select("-phone_number -residential_address -office_address -__v")
-      .populate("user_id", "firstName lastName role");
+      .populate({
+        path: "user_id",
+        select: "firstName lastName role",
+        match: { role: "artisan", isDeleted: { $ne: true } },
+      });
 
-    if (!profile || profile.isDeleted) {
+    if (!profile || profile.isDeleted || !profile.user_id) {
       return res.status(404).json({
         statusCode: 404,
         success: false,

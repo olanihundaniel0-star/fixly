@@ -32,10 +32,9 @@ export const fetchUser = async (req, res) => {
       });
     }
 
-    let artisanProfile = null;
-    if (user.role === "artisan") {
-      artisanProfile = await Profile.findOne({ user_id: id, isDeleted: { $ne: true } });
-    }
+    const profileFilter = { user_id: id };
+    if (req.query.includeDeleted !== "true") profileFilter.isDeleted = { $ne: true };
+    const artisanProfile = await Profile.findOne(profileFilter);
 
     return res.status(200).json({
       statusCode: 200,
@@ -47,6 +46,8 @@ export const fetchUser = async (req, res) => {
         lastName: user.lastName,
         email: user.email,
         role: user.role,
+        isDeleted: user.isDeleted,
+        deletedAt: user.deletedAt,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
         artisanProfile,

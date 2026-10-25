@@ -103,6 +103,10 @@ Public registration accepts only `house_owner` and `artisan` roles. An existing 
 Profile creation uses the authenticated artisan as its owner. Omit `user_id` from the request body; supplying it returns `400`.
 Ratings are initialized to an empty array by the server. Supplying `rating` when creating or updating a profile returns `400`.
 
+Accounts with an artisan profile, including a soft-deleted profile, must retain the `artisan` role; changing them to another role returns `409`. Public profile reads require an active artisan owner and an active profile. Admin user details with `includeDeleted=true` include deletion metadata and any soft-deleted profile.
+
+User deletion and restoration work with standalone MongoDB. They update the user first, then its profile regardless of the user's current role. These writes are not atomic: if the second write fails, the endpoint returns `500` and the same request can be retried to finish the operation. Public reads hide profiles belonging to deactivated, missing, or non-artisan users, including when a cascade is incomplete. A replica set and transactions are required if atomic multi-document changes become a deployment requirement.
+
 ### Image uploads
 
 Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env` to enable uploads. While they are missing, upload endpoints respond with `503`. Accepted format: `POST /api/v1/uploads/image` as `multipart/form-data` with an `image` field (JPEG/PNG/WEBP, up to 5MB); the response returns the Cloudinary `url` and `publicId`.
