@@ -51,7 +51,7 @@ export const getProfiles = async (req, res) => {
           foreignField: "_id",
           pipeline: [
             { $match: { role: "artisan", isDeleted: { $ne: true } } },
-            { $project: { firstName: 1, lastName: 1, role: 1 } },
+            { $project: { firstName: 1, lastName: 1, role: 1, "avatar.url": 1 } },
           ],
           as: "user_id",
         },
@@ -64,7 +64,13 @@ export const getProfiles = async (req, res) => {
             { $skip: skip },
             { $limit: limit },
             { $project: { phone_number: 0, residential_address: 0, office_address: 0, __v: 0 } },
-            { $set: { id: { $toString: "$_id" }, "user_id.id": { $toString: "$user_id._id" } } },
+            {
+              $set: {
+                id: { $toString: "$_id" },
+                "user_id.id": { $toString: "$user_id._id" },
+                "user_id.avatar": { $ifNull: ["$user_id.avatar", null] },
+              },
+            },
           ],
           total: [{ $count: "count" }],
         },
@@ -100,7 +106,7 @@ export const getProfileById = async (req, res) => {
       .select("-phone_number -residential_address -office_address -__v")
       .populate({
         path: "user_id",
-        select: "firstName lastName role",
+        select: "firstName lastName role avatar.url",
         match: { role: "artisan", isDeleted: { $ne: true } },
       });
 

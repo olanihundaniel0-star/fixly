@@ -8,6 +8,7 @@ const currentAvatarFilter = (user) => ({
   _id: user._id,
   isDeleted: { $ne: true },
   "avatar.publicId": user.avatar?.publicId || null,
+  avatarVersion: user.avatarVersion ? user.avatarVersion : { $in: [0, null] },
 });
 
 const conflict = (res) => res.status(409).json({
@@ -34,7 +35,10 @@ export const putAvatar = async (req, res) => {
   let installed = false;
   try {
     const previousId = req.user.avatar?.publicId;
-    const update = { $set: { avatar: { url: req.file.path, publicId: req.file.filename } } };
+    const update = {
+      $set: { avatar: { url: req.file.path, publicId: req.file.filename } },
+      $inc: { avatarVersion: 1 },
+    };
     if (previousId) update.$addToSet = { avatarCleanup: previousId };
     const user = await User.findOneAndUpdate(currentAvatarFilter(req.user), update, {
       returnDocument: "after",
@@ -61,7 +65,7 @@ export const putAvatar = async (req, res) => {
 
 export const deleteAvatar = async (req, res) => {
   try {
-    const update = { $set: { avatar: null } };
+    const update = { $set: { avatar: null }, $inc: { avatarVersion: 1 } };
     if (req.user.avatar?.publicId) update.$addToSet = { avatarCleanup: req.user.avatar.publicId };
     const user = await User.findOneAndUpdate(currentAvatarFilter(req.user), update, {
       returnDocument: "after",

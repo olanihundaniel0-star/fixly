@@ -18,6 +18,7 @@ process.env.CLOUDINARY_API_KEY = "avatar-test-key";
 process.env.CLOUDINARY_API_SECRET = "avatar-test-secret";
 
 const { default: User } = await import("../src/models/users.js");
+const { default: Profile } = await import("../src/models/artisanProfile.js");
 const { default: cloudinary } = await import("../src/config/cloudinary.js");
 const { cleanupAvatarImages, discardAvatarUpload } = await import("../src/services/avatarImages.js");
 const { default: app } = await import("../src/index.js");
@@ -33,7 +34,7 @@ await mongoose.connect(process.env.MONGODB_URI_TEST || "mongodb://127.0.0.1:2701
   dbName: databaseName,
   serverSelectionTimeoutMS: 5000,
 });
-await User.init();
+await Promise.all([User.init(), Profile.init()]);
 const password = await bcrypt.hash("StrongPass123", 4);
 
 const createUser = (fields = {}) => User.create({
@@ -91,6 +92,17 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+const createProfile = (user) => Profile.create({
+  user_id: user._id,
+  professional_headline: "Artisan with a profile picture",
+  profession: "Plumber",
+  experience_years: 3,
+  phone_number: "08012345678",
+  starting_price: 5000,
+  residential_address: "12 Allen Ave",
+  office_address: "12 Allen Ave",
+});
+
 describe("avatar image storage", () => {
   it("defaults to no avatar and hides provider and cleanup metadata", async () => {
     const user = await createUser();
@@ -102,6 +114,7 @@ describe("avatar image storage", () => {
     const publicUser = await User.findById(user._id).select("-password").lean();
     assert.deepEqual(publicUser.avatar, { url: avatar("private-avatar-id").url });
     assert.equal(publicUser.avatarCleanup, undefined);
+    assert.equal(publicUser.avatarVersion, undefined);
     const internalUser = await User.findById(user._id).select("+avatar.publicId +avatarCleanup");
     assert.equal(internalUser.avatar.publicId, "private-avatar-id");
     assert.deepEqual(internalUser.avatarCleanup.toObject(), ["private-cleanup-id"]);
@@ -201,7 +214,7 @@ describe("avatar API", () => {
   it("supports existing accounts with no stored avatar field", async (t) => {
     mockCloudinary(t);
     const user = await createUser();
-    await User.collection.updateOne({ _id: user._id }, { $unset: { avatar: "" } });
+    await User.collection.updateOne({ _id: user._id }, { $unset: { avatar: "", avatarVersion: "" } });
     await putImage(user).expect(201);
   });
 
@@ -263,6 +276,29 @@ describe("avatar API", () => {
     await putImage(user).expect(500);
     assert.deepEqual(storage.destroyed, [storage.uploaded[0].publicId]);
     assert.equal((await User.findById(user._id).select("+avatar.publicId")).avatar.publicId, "database-error-current");
+  });
+
+  it("preserves an installed image if the database write succeeded but its acknowledgement failed", async (t) => {
+    const user = await createUser();
+    const storage = mockCloudinary(t);
+    const update = User.findOneAndUpdate.bind(User);
+    t.mock.method(User, "findOneAndUpdate", async (...args) => {
+      await update(...args);
+      throw new Error("simulated lost acknowledgement");
+    });
+    await putImage(user).expect(500);
+    const saved = await User.findById(user._id).select("+avatar.publicId");
+    assert.equal(saved.avatar.publicId, storage.uploaded[0].publicId);
+    assert.equal(storage.destroyed.length, 0);
+  });
+
+  it("preserves the current image if saving avatar removal fails", async (t) => {
+    const user = await createUser({ avatar: avatar("failed-delete-save") });
+    const storage = mockCloudinary(t);
+    t.mock.method(User, "findOneAndUpdate", async () => { throw new Error("simulated database failure"); });
+    await request(app).delete("/api/v1/users/me/avatar").set(auth(user)).expect(500);
+    assert.equal(storage.destroyed.length, 0);
+    assert.equal((await User.findById(user._id).select("+avatar.publicId")).avatar.publicId, "failed-delete-save");
   });
 
   it("retains old-image cleanup after a provider failure and retries it on the next change", async (t) => {
@@ -349,6 +385,23 @@ describe("avatar API", () => {
     await request(app).get("/api/v1/users/me/avatar").set(auth(user)).expect(401);
   });
 
+  it("cancels an in-flight first upload when the user removes their picture", { timeout: 5000 }, async (t) => {
+    const user = await createUser();
+    const started = deferred();
+    const release = deferred();
+    const storage = mockCloudinary(t, { beforeComplete: async () => {
+      started.resolve();
+      await release.promise;
+    } });
+    const upload = putImage(user).then((res) => res);
+    await started.promise;
+    await request(app).delete("/api/v1/users/me/avatar").set(auth(user)).expect(200);
+    release.resolve();
+    assert.equal((await upload).status, 409);
+    assert.equal((await User.findById(user._id)).avatar, null);
+    assert.deepEqual(storage.destroyed, [storage.uploaded[0].publicId]);
+  });
+
   it("limits upload attempts per account without blocking another account", async (t) => {
     const user = await createUser();
     const other = await createUser();
@@ -360,5 +413,117 @@ describe("avatar API", () => {
     await putImage(user).expect(429);
     await putImage(other).expect(201);
     assert.equal(storage.uploaded.length, 1);
+  });
+});
+
+describe("avatar responses and account lifecycle", () => {
+  it("includes only the avatar URL in login, account updates, and admin responses", async () => {
+    const user = await createUser({
+      avatar: avatar("response-avatar"),
+      avatarCleanup: ["response-cleanup"],
+    });
+    const admin = await createUser({ role: "admin" });
+    const login = await request(app).post("/api/v1/auth/login")
+      .send({ email: user.email, password: "StrongPass123" }).expect(200);
+    assert.deepEqual(login.body.data.avatar, { url: avatar("response-avatar").url });
+    const updated = await request(app).patch(`/api/v1/users/${user.id}`)
+      .set(auth(user)).send({ firstName: "Updated" }).expect(200);
+    assert.deepEqual(updated.body.data.avatar, { url: avatar("response-avatar").url });
+    assert.equal(updated.body.data.avatarCleanup, undefined);
+    const detail = await request(app).get(`/api/v1/admin/user/${user.id}`)
+      .set(auth(admin)).expect(200);
+    assert.deepEqual(detail.body.data.avatar, { url: avatar("response-avatar").url });
+    const list = await request(app).get("/api/v1/admin/users?limit=100")
+      .set(auth(admin)).expect(200);
+    const found = list.body.data.find((entry) => entry.id === user.id);
+    assert.deepEqual(found.avatar, { url: avatar("response-avatar").url });
+    assert.equal(found.avatarCleanup, undefined);
+    assert.equal(found.password, undefined);
+  });
+
+  it("includes avatar URLs in public artisan profiles without provider metadata", async () => {
+    const user = await createUser({ role: "artisan", avatar: avatar("public-artisan-avatar") });
+    const profile = await createProfile(user);
+    const detail = await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    assert.deepEqual(detail.body.data.user_id.avatar, { url: avatar("public-artisan-avatar").url });
+    assert.equal(detail.body.data.user_id.email, undefined);
+    const list = await request(app).get("/api/v1/artisan/profiles?limit=100").expect(200);
+    const found = list.body.data.find((entry) => entry.id === profile.id);
+    assert.deepEqual(found.user_id.avatar, { url: avatar("public-artisan-avatar").url });
+    assert.equal(found.user_id.avatarCleanup, undefined);
+    assert.equal(found.user_id.password, undefined);
+  });
+
+  it("returns null for artisan avatars that have not been uploaded", async () => {
+    const user = await createUser({ role: "artisan" });
+    const profile = await createProfile(user);
+    const detail = await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    assert.equal(detail.body.data.user_id.avatar, null);
+    const list = await request(app).get("/api/v1/artisan/profiles?limit=100").expect(200);
+    assert.equal(list.body.data.find((entry) => entry.id === profile.id).user_id.avatar, null);
+  });
+
+  it("does not allow avatar metadata to be changed through ordinary user updates", async () => {
+    const user = await createUser({ avatar: avatar("protected-avatar") });
+    await request(app).patch(`/api/v1/users/${user.id}`).set(auth(user))
+      .send({ avatar: avatar("forged"), avatarCleanup: ["someone-else"] }).expect(400);
+    await request(app).patch(`/api/v1/users/${user.id}`).set(auth(user))
+      .send({ firstName: "Allowed", avatar: avatar("forged"), avatarCleanup: ["someone-else"] }).expect(200);
+    const saved = await User.findById(user._id).select("+avatar.publicId +avatarCleanup");
+    assert.equal(saved.avatar.publicId, "protected-avatar");
+    assert.deepEqual(saved.avatarCleanup.toObject(), []);
+  });
+
+  it("retains the picture through soft deletion and restoration", async (t) => {
+    const user = await createUser({ role: "artisan", avatar: avatar("restore-picture") });
+    const profile = await createProfile(user);
+    const admin = await createUser({ role: "admin" });
+    const storage = mockCloudinary(t);
+    await request(app).patch(`/api/v1/admin/user/${user.id}/soft-delete`).set(auth(admin)).expect(200);
+    await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(404);
+    await request(app).put("/api/v1/users/me/avatar").set(auth(user))
+      .attach("image", image, "avatar.png").expect(401);
+    await request(app).delete("/api/v1/users/me/avatar").set(auth(user)).expect(401);
+    assert.equal((await User.findById(user._id).select("+avatar.publicId")).avatar.publicId, "restore-picture");
+    assert.equal(storage.destroyed.length, 0);
+    await request(app).patch(`/api/v1/admin/user/${user.id}/restore`).set(auth(admin)).expect(200);
+    const restored = await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    assert.deepEqual(restored.body.data.user_id.avatar, { url: avatar("restore-picture").url });
+  });
+
+  it("removes current and pending images before permanently deleting an account", async (t) => {
+    const user = await createUser({
+      role: "artisan",
+      avatar: avatar("hard-delete-current"),
+      avatarCleanup: ["hard-delete-old"],
+    });
+    const profile = await createProfile(user);
+    const admin = await createUser({ role: "admin" });
+    const storage = mockCloudinary(t);
+    await request(app).delete(`/api/v1/admin/user/${user.id}`).set(auth(admin)).expect(200);
+    assert.deepEqual(storage.destroyed.sort(), ["hard-delete-current", "hard-delete-old"]);
+    assert.equal(await User.findById(user._id), null);
+    assert.equal(await Profile.findById(profile._id), null);
+  });
+
+  it("keeps a deactivated account and its cleanup records when permanent deletion needs a retry", async (t) => {
+    const user = await createUser({ role: "artisan", avatar: avatar("hard-delete-retry-avatar") });
+    const profile = await createProfile(user);
+    const admin = await createUser({ role: "admin" });
+    const storage = mockCloudinary(t);
+    t.mock.method(console, "error", () => {});
+    storage.destroy.mock.mockImplementation(async () => { throw new Error("provider down"); });
+    await request(app).delete(`/api/v1/admin/user/${user.id}`).set(auth(admin)).expect(503);
+    const saved = await User.findById(user._id).select("+avatarCleanup");
+    assert.equal(saved.isDeleted, true);
+    assert.equal(saved.avatar, null);
+    assert.deepEqual(saved.avatarCleanup.toObject(), ["hard-delete-retry-avatar"]);
+    await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(404);
+    await request(app).post("/api/v1/auth/login")
+      .send({ email: user.email, password: "StrongPass123" }).expect(401);
+    storage.destroy.mock.mockImplementation(async () => ({ result: "ok" }));
+    await request(app).delete(`/api/v1/admin/user/${user.id}`).set(auth(admin)).expect(200);
+    assert.equal(await User.findById(user._id), null);
+    assert.equal(await Profile.findById(profile._id), null);
   });
 });
