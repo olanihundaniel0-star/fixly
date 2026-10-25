@@ -92,7 +92,7 @@ Open the local URL printed by Vite. To create a production build, run `npm run b
 | --- | --- |
 | `/api/v1/auth` | Register and log in |
 | `/api/v1/artisan` | Create, browse, and update artisan profiles |
-| `/api/v1/users` | Update your user account |
+| `/api/v1/users` | Update your user account and manage your avatar |
 | `/api/v1/admin` | Manage users as an administrator |
 | `/api/v1/uploads` | Upload images to Cloudinary (auth required) |
 
@@ -110,3 +110,31 @@ User deletion and restoration work with standalone MongoDB. They update the user
 ### Image uploads
 
 Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env` to enable uploads. While they are missing, upload endpoints respond with `503`. Accepted format: `POST /api/v1/uploads/image` as `multipart/form-data` with an `image` field (JPEG/PNG/WEBP, up to 5MB); the response returns the Cloudinary `url` and `publicId`.
+
+### User profile pictures
+
+Avatars belong to the user account and work for homeowners, artisans, and administrators. All avatar routes require a Bearer token and operate on the authenticated account.
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/v1/users/me/avatar` | Returns `data.avatar` as `{ "url": "https://..." }` or `null` |
+| `PUT /api/v1/users/me/avatar` | Creates or replaces the picture; returns `201` for a first upload and `200` for a replacement |
+| `DELETE /api/v1/users/me/avatar` | Removes the picture; returns `200` with `data.avatar: null`, including when there is no picture |
+
+Upload exactly one JPEG, PNG, or WEBP image, up to 5MB, as the multipart field `image`. Additional fields and files are rejected. Cloudinary validates the image format and stores a 512 by 512 WEBP image with automatic crop positioning and quality. Upload attempts are limited to 10 per account in 15 minutes.
+
+```bash
+curl -X PUT http://localhost:5000/api/v1/users/me/avatar \
+  -H 'Authorization: Bearer <token>' \
+  -F 'image=@/path/to/photo.jpg'
+```
+
+The server saves the new image before removing the previous one. A failed database save or a conflicting account change triggers cleanup of the unattached upload. Concurrent changes return `409`; reload the avatar before retrying. Existing accounts need no data migration.
+
+Cloudinary public IDs, avatar revisions, and pending cleanup records remain internal. Login and admin responses include `avatar`, and public artisan responses include it under `user_id.avatar`. A missing picture is represented by `null`, allowing clients to display a default image. The generic `/uploads/image` endpoint only uploads an image; use the avatar routes to attach a picture to an account.
+
+Failed cleanup is retained on the account and retried during the next avatar change or permanent account deletion. Replacing a picture still succeeds if only the previous image's cleanup fails. Deleting a picture returns `503` if external cleanup is pending; the account already has `avatar: null`, and repeating DELETE finishes cleanup. If MongoDB is unavailable while an unattached upload needs cleanup, the server logs its public ID for recovery. There is no background cleanup worker.
+
+Soft deletion retains pictures for restoration. Permanent deletion first deactivates the account and removes its current and pending avatar images; if Cloudinary cleanup fails, it returns `503` and retains the deactivated account for retry.
+
+Cloudinary configuration is checked for presence at startup. The configured cloud name, API key, and API secret must also be valid for real uploads. Avatar tests exercise multipart requests and MongoDB persistence with the Cloudinary upload and deletion methods mocked, so they do not upload files to a real cloud account.

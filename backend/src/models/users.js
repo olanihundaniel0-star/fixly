@@ -1,5 +1,10 @@
 import mongoose from "mongoose";
 
+const avatarSchema = new mongoose.Schema({
+    url: { type: String, required: true, match: /^https:\/\// },
+    publicId: { type: String, required: true, select: false },
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
     firstName: {type: String, required: true, trim: true},
     lastName: {type: String, required: true, trim: true},
@@ -20,6 +25,9 @@ const userSchema = new mongoose.Schema({
     },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date, default: null },
+    avatar: { type: avatarSchema, default: null },
+    avatarVersion: { type: Number, default: 0, select: false },
+    avatarCleanup: { type: [String], default: [], select: false },
    
 },
 {

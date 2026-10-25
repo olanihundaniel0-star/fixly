@@ -46,6 +46,7 @@ export const fetchUser = async (req, res) => {
         lastName: user.lastName,
         email: user.email,
         role: user.role,
+        avatar: user.avatar ? { url: user.avatar.url } : null,
         isDeleted: user.isDeleted,
         deletedAt: user.deletedAt,
         createdAt: user.createdAt,

@@ -71,10 +71,14 @@ app.use((error, req, res, next) => {
         });
     }
     if (error.http_code) {
-        return res.status(error.http_code < 500 ? 400 : 500).json({
-            statusCode: error.http_code < 500 ? 400 : 500,
+        const providerStatus = Number(error.http_code);
+        const status = providerStatus >= 500 || [401, 403, 408, 420, 429, 499].includes(providerStatus)
+            ? 503
+            : 400;
+        return res.status(status).json({
+            statusCode: status,
             success: false,
-            message: "Image upload failed",
+            message: status === 503 ? "Image storage is unavailable. Please try again later." : "Image upload failed",
         });
     }
     const status = error.statusCode || 500;

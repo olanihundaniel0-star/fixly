@@ -44,7 +44,7 @@ export const requireAuth = async (req, res, next) => {
       return unauthorized(res, "Invalid token");
     }
 
-    const user = await User.findById(decoded.id).select("-password");
+    const user = await User.findById(decoded.id).select("-password +avatar.publicId +avatarVersion");
     if (!user || user.isDeleted) {
       return unauthorized(res, "User no longer exists or is deactivated");
     }
