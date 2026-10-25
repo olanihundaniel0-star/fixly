@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import Profile from "../../models/artisanProfile.js";
 import User from "../../models/users.js";
 import { handleMongooseError, isDuplicateKey } from "../../utils/errors.js";
@@ -6,28 +5,16 @@ import { handleMongooseError, isDuplicateKey } from "../../utils/errors.js";
 export const createProfile = async (req, res) => {
   try {
     const {
-      user_id,
       professional_headline,
       profession,
       experience_years,
-      rating,
       phone_number,
       starting_price,
       residential_address,
       office_address,
     } = req.body;
 
-    // 1. Check if user_id was provided and valid
-    if (!user_id || !mongoose.Types.ObjectId.isValid(user_id)) {
-      return res.status(400).json({
-        statusCode: 400,
-        success: false,
-        message: "A valid user_id is required",
-      });
-    }
-
-    // 2. Find the user
-    const user = await User.findById(user_id);
+    const user = await User.findById(req.user._id);
 
     // 3. Check if user exists
     if (!user || user.isDeleted) {
@@ -67,7 +54,6 @@ export const createProfile = async (req, res) => {
       professional_headline,
       profession,
       experience_years,
-      rating,
       phone_number,
       starting_price,
       residential_address,
@@ -101,7 +87,6 @@ export const createProfile = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Profile error:", error);
     if (isDuplicateKey(error)) {
       return res.status(409).json({
         statusCode: 409,
@@ -109,6 +94,7 @@ export const createProfile = async (req, res) => {
         message: "User profile already exists.",
       });
     }
+    console.error("Profile error:", error);
     return handleMongooseError(res, error);
   }
 };

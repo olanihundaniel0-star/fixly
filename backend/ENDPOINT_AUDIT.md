@@ -11,7 +11,7 @@ Protected routes require:
 Authorization: Bearer <token>
 ```
 
-Tokens are issued by POST /api/v1/auth/login. The JWT payload is `{ id, role }` and expires after `JWT_EXPIRES_IN` (default `1d`). If `JWT_SECRET` is not configured, login succeeds without a token.
+Tokens are issued by POST /api/v1/auth/login. The JWT payload contains the user id plus standard timestamps; roles are loaded from the database on authenticated requests. Tokens expire after `JWT_EXPIRES_IN` (default `1d`). The server refuses to start without `JWT_SECRET`. Unexpected login failures return a generic 500 response without internal error details.
 
 Middleware (src/middleware/authentication.js):
 - requireAuth: Requires a valid Bearer token. Loads the user (password excluded), rejects missing/expired/invalid tokens and soft-deleted users with 401, then sets `req.user`.
@@ -40,7 +40,7 @@ ArtisanProfile (src/models/artisanProfile.js):
 - professional_headline: string, required
 - profession: string, required, Carpenter, Plumber, Welder, Brick Layer, Electrician, Auto Mechanic, Painter, Others
 - experience_years: number, required
-- rating: array of numbers, optional, create only (immutable on update)
+- rating: array of numbers, initialized to [] by the server (forbidden on create and update)
 - phone_number: string, required
 - starting_price: number, required
 - residential_address: string, required
@@ -54,18 +54,20 @@ ArtisanProfile (src/models/artisanProfile.js):
 - GET / - Welcome message. Public.
 - POST /api/v1/auth/register - Register. Body: firstName, lastName, email, password, confirmPassword, role (optional, defaults to house_owner). Public. 201 on success, 400 validation, 409 duplicate email.
 - POST /api/v1/auth/login - Login. Body: email, password. Public. 200 on success with data { id, firstName, lastName, email, role, token }, 400 validation, 401 invalid credentials.
-- POST /api/v1/artisan/profile - Create profile. Requires Bearer auth + artisan role. Body: user_id, professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address, rating (optional). 201 on success, 400 validation / invalid user_id, 401 unauthenticated, 403 non-artisan, 404 user not found, 409 profile exists.
+- POST /api/v1/artisan/profile - Create profile owned by the authenticated artisan. Requires Bearer auth + artisan role. Body: professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address. Supplying user_id or rating is rejected. 201 on success, 400 validation, 401 unauthenticated, 403 non-artisan, 404 user not found, 409 profile exists.
 - PATCH /api/v1/artisan/profile/:id - Update profile by profile _id (partial or full). Requires Bearer auth; owner or admin. Body: any of professional_headline, profession, experience_years, phone_number, starting_price, residential_address, office_address. Immutable: user_id, rating, _id, __v (400 if sent). Empty strings rejected. 200 on success, 400 invalid id / empty body, 401 unauthenticated, 403 non-owner, 404 not found.
-- GET /api/v1/artisan/profiles - List all artisan profiles (phone/address excluded, user populated with firstName, lastName, role). Soft-deleted excluded. Query: profession (must be valid enum), search (matches professional_headline, profession, case-insensitive), page (default 1), limit (default 20, max 100), sortBy (createdAt, experience_years, starting_price; default createdAt), order (asc else desc). Returns data + meta { total, page, limit, totalPages }. Public; optional auth populates req.user for valid tokens. 400 invalid profession.
-- GET /api/v1/artisan/profile/:id - Get one profile by profile _id (phone/address excluded, user populated). 400 invalid id, 404 if missing or soft-deleted. Public; optional auth populates req.user for valid tokens.
+- GET /api/v1/artisan/profiles - List active profiles whose owners are active artisans (phone/address excluded, user populated with firstName, lastName, role). Query: profession (must be valid enum), search (matches professional_headline, profession, case-insensitive), page (default 1), limit (default 20, max 100), sortBy (createdAt, experience_years, starting_price; default createdAt), order (asc else desc). Returns data + meta { total, page, limit, totalPages }, counting only visible profiles. Public; optional auth populates req.user for valid tokens. 400 invalid profession.
+- GET /api/v1/artisan/profile/:id - Get one profile by profile _id (phone/address excluded, user populated). 400 invalid id, 404 if missing, soft-deleted, or its owner is missing, soft-deleted, or no longer an artisan. Public; optional auth populates req.user for valid tokens.
 - GET /api/v1/admin/users - List all users (password excluded, sorted createdAt desc). Query: page (default 1), limit (default 20, max 100), includeDeleted=true to show soft-deleted (default hides them). Returns data + meta { total, page, limit, totalPages }. Requires Bearer auth + admin role.
-- GET /api/v1/admin/user/:id - Get one user by user _id, includes artisanProfile for artisans (non-deleted only). Query: includeDeleted=true to view soft-deleted (default hides them with 404). Returns { id, firstName, lastName, email, role, createdAt, updatedAt, artisanProfile }. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
-- PATCH /api/v1/admin/user/:id - Update any user by user _id. Allowed: firstName, lastName, role. 400 invalid id / empty body / no allowed fields, 404 not found. Requires Bearer auth + admin role.
-- PATCH /api/v1/admin/user/:id/soft-delete - Soft-delete user by user _id. Sets isDeleted=true, deletedAt=now on user and its artisan profile (if role is artisan). Idempotent: returns 200 "User already soft-deleted" if already flagged. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
-- PATCH /api/v1/admin/user/:id/restore - Restore soft-deleted user by user _id. Clears isDeleted/deletedAt on user and its artisan profile (if role is artisan). Idempotent: returns 200 "User is not soft-deleted" if not flagged. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
-- DELETE /api/v1/admin/user/:id - Hard-delete (permanent) user by user _id. Cascade-deletes artisan profile via Profile.deleteOne({ user_id }) if role is artisan, then User.deleteOne. Returns { id }. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
+- GET /api/v1/admin/user/:id - Get one user by user _id and any associated artisanProfile, regardless of current role. Query: includeDeleted=true includes soft-deleted users and profiles (default hides deleted users with 404 and omits deleted profiles). Returns { id, firstName, lastName, email, role, isDeleted, deletedAt, createdAt, updatedAt, artisanProfile }. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
+- PATCH /api/v1/admin/user/:id - Update an active user by user _id. Allowed: firstName, lastName, role. 400 invalid id / empty body / no allowed fields, 404 missing or soft-deleted user, 409 changing away from artisan when any profile exists. Requires Bearer auth + admin role.
+- PATCH /api/v1/admin/user/:id/soft-delete - Soft-delete user by user _id. Sets isDeleted=true with the same deletedAt on user and its profile regardless of current role. Returns 200 on repeats and retries profile synchronization; preserves the existing deletion timestamp. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
+- PATCH /api/v1/admin/user/:id/restore - Restore user by user _id. Clears isDeleted/deletedAt on user and its profile regardless of current role. Returns 200 on repeats and retries profile synchronization. 400 invalid id, 404 not found. Requires Bearer auth + admin role.
+- DELETE /api/v1/admin/user/:id - Hard-delete (permanent) user by user _id, then delete any profile owned by that id regardless of current role. A retry can remove an orphaned profile after an earlier partial failure. Returns { id }. 400 invalid id, 404 only when neither user nor profile exists. Requires Bearer auth + admin role.
 - PATCH /api/v1/users/:id - Update own name by user _id. Allowed: firstName, lastName. 400 invalid id / empty body / no allowed fields, 404 not found. Requires Bearer auth; self or admin.
 - All unmatched routes - 404 { statusCode: 404, success: false, message: "Route not found" }.
+
+Lifecycle writes support standalone MongoDB and are non-atomic. A failure returns 500; retrying the same request finishes the profile update or cleanup. Public profile reads independently require an active artisan owner, so failed cascades do not expose profiles of deactivated or missing users.
 
 ## Request Body Schemas
 
@@ -75,7 +77,7 @@ POST /api/v1/auth/register (Joi: registerValidationSchema):
 - email: string, trimmed, lowercased, valid email, required
 - password: string, required, 10-100 chars, must contain lowercase, uppercase and a digit
 - confirmPassword: must match password when provided
-- role: "house_owner" | "artisan" | "admin", default "house_owner"
+- role: "house_owner" | "artisan", default "house_owner"; public admin registration is rejected
 - Unknown fields are stripped.
 
 POST /api/v1/auth/login (Joi: loginValidationSchema):
@@ -83,7 +85,7 @@ POST /api/v1/auth/login (Joi: loginValidationSchema):
 - password: string, required
 
 POST /api/v1/artisan/profile (Joi: profileCreateSchema):
-- user_id: 24-char hex ObjectId, required (the controller requires an existing user with role artisan; it is not currently forced to match the caller)
+- user_id: forbidden; ownership comes from the authenticated user
 - professional_headline: string, trimmed, min 3 chars, required
 - profession: one of Carpenter, Plumber, Welder, Brick Layer, Electrician, Auto Mechanic, Painter, Others, required
 - experience_years: number >= 0, required
@@ -91,7 +93,7 @@ POST /api/v1/artisan/profile (Joi: profileCreateSchema):
 - starting_price: number >= 0, required
 - residential_address: string, trimmed, min 3 chars, required
 - office_address: string, trimmed, min 3 chars, required
-- rating: optional array of numbers between 1 and 5 (model default [])
+- rating: forbidden; new profiles use the model default []
 
 PATCH /api/v1/artisan/profile/:id (Joi: profileUpdateSchema):
 - At least one of: professional_headline (min 3), profession (valid enum), experience_years (>= 0), phone_number (min 7), starting_price (>= 0), residential_address (min 3), office_address (min 3)
@@ -100,6 +102,7 @@ PATCH /api/v1/artisan/profile/:id (Joi: profileUpdateSchema):
 
 PATCH /api/v1/admin/user/:id (controller-level validation):
 - At least one of: firstName (string), lastName (string), role ("house_owner" | "artisan" | "admin")
+- If any artisan profile exists, including a soft-deleted profile, role must remain artisan (409 otherwise).
 - Other fields are ignored; 400 if no allowed field is supplied
 
 PATCH /api/v1/users/:id (controller-level validation):

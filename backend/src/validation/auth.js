@@ -18,10 +18,10 @@ const registerValidationSchema = Joi.object({
     "any.only": "Passwords do not match",
   }),
   role: Joi.string()
-    .valid("house_owner", "artisan", "admin")
+    .valid("house_owner", "artisan")
     .default("house_owner")
     .messages({
-      "any.only": "Role must be either house_owner, Artisan or Admin",
+      "any.only": "Role must be either house_owner or artisan",
     }),
 });
 // adding fields as required 
@@ -32,9 +32,8 @@ const loginValidationSchema = Joi.object({
 
 //
 const profileCreateSchema = Joi.object({
-  user_id: Joi.string().hex().length(24).required().messages({
-    "string.length": "user_id must be a valid ObjectId",
-    "any.required": "user_id is required",
+  user_id: Joi.any().forbidden().messages({
+    "any.unknown": "Profile ownership is determined by the authenticated user",
   }),
   professional_headline: Joi.string().trim().min(3).required().messages({
     "string.base": "Professional Headline must be a text",
@@ -52,7 +51,9 @@ const profileCreateSchema = Joi.object({
     "number.min": "Experience years cannot be negative",
     "any.required": "Experience years is required",
   }),
-  rating: Joi.array().items(Joi.number().min(1).max(5)).optional(),
+  rating: Joi.any().forbidden().messages({
+    "any.unknown": "Ratings cannot be supplied when creating a profile",
+  }),
   phone_number: Joi.string().trim().min(7).required(),
   starting_price: Joi.number().min(0).required(),
   residential_address: Joi.string().trim().min(3).required(),

@@ -1,4 +1,12 @@
+import dotenv from "dotenv";
+import {
+  createTestDatabaseName,
+  cleanupTestDatabase,
+} from "./helpers/database.js";
+
+dotenv.config({ quiet: true });
 process.env.NODE_ENV = "test";
+process.env.JWT_SECRET = "fixly-integration-test-secret";
 process.env.MONGODB_URI_TEST ??= "mongodb://127.0.0.1:27017/fixly-backend-test";
 process.env.MONGODB_URI = process.env.MONGODB_URI_TEST;
 process.env.AUTH_RATE_LIMIT_MAX = "1000";
@@ -28,8 +36,19 @@ const bearer = (token) => ({ Authorization: `Bearer ${token}` });
 const jsonOf = (payload) =>
   JSON.parse(Buffer.from(payload.split(".")[1], "base64url").toString("utf8"));
 
-await mongoose.connect(process.env.MONGODB_URI);
-await mongoose.connection.dropDatabase();
+const testDatabaseName = createTestDatabaseName();
+after(async () => {
+  if (mongoose.connection.readyState !== 0) {
+    await cleanupTestDatabase(mongoose.connection, testDatabaseName);
+  }
+});
+
+await mongoose.connect(process.env.MONGODB_URI, {
+  dbName: testDatabaseName,
+  serverSelectionTimeoutMS: 5000,
+});
+assert.equal(mongoose.connection.name, testDatabaseName);
+await Promise.all([User.init(), Profile.init()]);
 
 const hashed = await bcrypt.hash("Admin#Pass123", await bcrypt.genSalt(4));
 const admin = await User.create({
@@ -38,11 +57,6 @@ const admin = await User.create({
   email: `admin-${stamp}@fixly.test`,
   password: hashed,
   role: "admin",
-});
-
-after(async () => {
-  await mongoose.connection.dropDatabase();
-  await mongoose.connection.close();
 });
 
 describe("Fixly API", () => {
@@ -70,6 +84,18 @@ describe("Fixly API", () => {
       password: "short",
     }).expect(400);
     assert.ok(res.body.errors.length > 0);
+  });
+
+  it("rejects public admin registration without creating an account", async () => {
+    const email = `public-admin-${stamp}@fixly.test`;
+    await register({
+      firstName: "Public",
+      lastName: "Admin",
+      email,
+      password: PASSWORD,
+      role: "admin",
+    }).expect(400);
+    assert.equal(await User.exists({ email }), null);
   });
 
   it("rejects mismatched confirmPassword", async () => {
@@ -101,6 +127,40 @@ describe("Fixly API", () => {
   it("returns 401 for unknown accounts without leaking existence", async () => {
     const res = await login(`ghost-${stamp}@fixly.test`).expect(401);
     assert.equal(res.body.message, "Invalid email or password");
+  });
+
+  it("hides database failure details in production login responses and logs", async (t) => {
+    const environment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    t.after(() => { process.env.NODE_ENV = environment; });
+    t.mock.method(User, "findOne", () => {
+      throw new Error("mongodb://private-user:private-password@internal-db");
+    });
+    const logger = t.mock.method(console, "error", () => {});
+    const res = await login(`owner-${stamp}@fixly.test`).expect(500);
+    assert.deepEqual(res.body, {
+      statusCode: 500,
+      success: false,
+      message: "Internal Server Error",
+    });
+    assert.equal(logger.mock.callCount(), 1);
+    assert.doesNotMatch(JSON.stringify(logger.mock.calls), /private-password/);
+  });
+
+  it("hides token generation errors from login responses", async (t) => {
+    const expiresIn = process.env.JWT_EXPIRES_IN;
+    process.env.JWT_EXPIRES_IN = "invalid-duration";
+    t.after(() => {
+      if (expiresIn === undefined) delete process.env.JWT_EXPIRES_IN;
+      else process.env.JWT_EXPIRES_IN = expiresIn;
+    });
+    t.mock.method(console, "error", () => {});
+    const res = await login(`owner-${stamp}@fixly.test`).expect(500);
+    assert.deepEqual(res.body, {
+      statusCode: 500,
+      success: false,
+      message: "Internal Server Error",
+    });
   });
 
   it("sends rate-limit headers on auth responses", async () => {
@@ -187,13 +247,36 @@ describe("Fixly API", () => {
     });
 
     it("rejects profile creation for non-artisan users", async () => {
-      const user = await User.findOne({ email: `owner-${stamp}@fixly.test` });
+      const ownerToken = (await login(`owner-${stamp}@fixly.test`)).body.data.token;
       const res = await request(app)
         .post("/api/v1/artisan/profile")
-        .set(bearer(artisanToken))
-        .send({ user_id: user._id.toString(), professional_headline: "Home plumbing", profession: "Plumber", experience_years: 3, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .set(bearer(ownerToken))
+        .send({ professional_headline: "Home plumbing", profession: "Plumber", experience_years: 3, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
         .expect(403);
-      assert.match(res.body.message, /artisan/i);
+      assert.match(res.body.message, /permission/i);
+    });
+
+    it("rejects supplied ownership even when it names the caller", async () => {
+      const caller = await User.findOne({ email: `artisan-${stamp}@fixly.test` });
+      const other = await User.findOne({ email: `technician-${stamp}@fixly.test` });
+      for (const user of [caller, other]) {
+        await request(app)
+          .post("/api/v1/artisan/profile")
+          .set(bearer(artisanToken))
+          .send({ user_id: user._id.toString(), professional_headline: "Home plumbing", profession: "Plumber", experience_years: 3, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+          .expect(400);
+        assert.equal(await Profile.exists({ user_id: user._id }), null);
+      }
+    });
+
+    it("rejects self-assigned ratings without creating a profile", async () => {
+      const user = await User.findOne({ email: `artisan-${stamp}@fixly.test` });
+      await request(app)
+        .post("/api/v1/artisan/profile")
+        .set(bearer(artisanToken))
+        .send({ rating: [5, 5, 5], professional_headline: "Expert home plumbing", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .expect(400);
+      assert.equal(await Profile.exists({ user_id: user._id }), null);
     });
 
     it("lets an artisan create their profile and prevents duplicates", async () => {
@@ -201,14 +284,16 @@ describe("Fixly API", () => {
       const res = await request(app)
         .post("/api/v1/artisan/profile")
         .set(bearer(artisanToken))
-        .send({ user_id: user._id.toString(), professional_headline: "Expert home plumbing", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .send({ professional_headline: "Expert home plumbing", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
         .expect(201);
       profileId = res.body.data.id;
+      assert.equal(res.body.data.user_id, user._id.toString());
+      assert.deepEqual(res.body.data.rating, []);
       assert.equal(res.body.data.profession, "Plumber");
       await request(app)
         .post("/api/v1/artisan/profile")
         .set(bearer(artisanToken))
-        .send({ user_id: user._id.toString(), professional_headline: "Duplicate", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
+        .send({ professional_headline: "Duplicate", profession: "Plumber", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" })
         .expect(409);
     });
 
@@ -270,6 +355,17 @@ describe("Fixly API", () => {
         .expect((r) => assert.equal(r.body.data.starting_price, 7000));
     });
 
+    it("rejects rating updates without applying other changes", async () => {
+      await request(app)
+        .patch(`/api/v1/artisan/profile/${profileId}`)
+        .set(bearer(artisanToken))
+        .send({ rating: [5], starting_price: 1 })
+        .expect(400);
+      const profile = await Profile.findById(profileId);
+      assert.deepEqual(profile.rating.toObject(), []);
+      assert.equal(profile.starting_price, 7000);
+    });
+
     it("rejects updates on soft-deleted profiles", async () => {
       await Profile.updateOne(
         { _id: profileId },
@@ -285,12 +381,51 @@ describe("Fixly API", () => {
         { isDeleted: false, deletedAt: null },
       );
     });
+
+    it("creates only one profile when the owner sends concurrent requests", async () => {
+      const body = { professional_headline: "Expert electrical repairs", profession: "Electrician", experience_years: 5, phone_number: "08012345678", starting_price: 5000, residential_address: "12 Allen Ave", office_address: "12 Allen Ave" };
+      const results = await Promise.all([1, 2].map(() => request(app)
+        .post("/api/v1/artisan/profile")
+        .set(bearer(technicianToken))
+        .send(body)));
+      assert.deepEqual(results.map((res) => res.status).sort(), [201, 409]);
+      const user = await User.findOne({ email: `technician-${stamp}@fixly.test` });
+      assert.equal(await Profile.countDocuments({ user_id: user._id }), 1);
+    });
   });
 
   describe("admin management", () => {
     let adminToken;
     let technicianToken;
     let technicianId;
+
+    const createArtisan = async (label) => {
+      const user = await User.create({
+        firstName: "Test",
+        lastName: "Artisan",
+        email: `${label}-${stamp}@fixly.test`,
+        password: hashed,
+        role: "artisan",
+      });
+      const profile = await Profile.create({
+        user_id: user._id,
+        professional_headline: "Lifecycle test artisan",
+        profession: "Plumber",
+        experience_years: 3,
+        phone_number: "08012345678",
+        starting_price: 5000,
+        residential_address: "12 Allen Ave",
+        office_address: "12 Allen Ave",
+      });
+      return { user, profile };
+    };
+
+    const assertHidden = async (profile) => {
+      await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(404);
+      const list = await request(app).get("/api/v1/artisan/profiles?limit=100").expect(200);
+      assert.ok(!list.body.data.some((item) => item.id === profile.id));
+      assert.equal(list.body.meta.total, list.body.data.length);
+    };
 
     it("requires admin role", async () => {
       adminToken = (await login(`admin-${stamp}@fixly.test`, "Admin#Pass123")).body.data.token;
@@ -314,6 +449,8 @@ describe("Fixly API", () => {
         .set(bearer(adminToken))
         .expect(200);
       assert.equal(res.body.data.email, `technician-${stamp}@fixly.test`);
+      assert.equal(res.body.data.artisanProfile.user_id, technicianId);
+      assert.equal(res.body.data.isDeleted, false);
     });
 
     it("updates a user as admin", async () => {
@@ -325,12 +462,66 @@ describe("Fixly API", () => {
         .expect((r) => assert.equal(r.body.data.firstName, "Roberta"));
     });
 
+    it("allows an existing admin to promote an account without a profile", async () => {
+      const user = await User.create({
+        firstName: "New",
+        lastName: "Admin",
+        email: `promoted-${stamp}@fixly.test`,
+        password: hashed,
+        role: "house_owner",
+      });
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(technicianToken))
+        .send({ role: "admin" })
+        .expect(403);
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .send({ role: "admin" })
+        .expect(200);
+      const token = (await login(user.email, "Admin#Pass123").expect(200)).body.data.token;
+      await request(app).get("/api/v1/admin/users").set(bearer(token)).expect(200);
+    });
+
+    it("rejects moving an account away from artisan while any profile exists", async () => {
+      for (const isDeleted of [false, true]) {
+        await Profile.updateOne({ user_id: technicianId }, { isDeleted });
+        for (const role of ["house_owner", "admin"]) {
+          await request(app)
+            .patch(`/api/v1/admin/user/${technicianId}`)
+            .set(bearer(adminToken))
+            .send({ role, firstName: "Must not change" })
+            .expect(409);
+        }
+        const user = await User.findById(technicianId);
+        assert.equal(user.role, "artisan");
+        assert.equal(user.firstName, "Roberta");
+      }
+      await Profile.updateOne({ user_id: technicianId }, { isDeleted: false });
+    });
+
     it("soft-deletes, hides, and restores a user", async () => {
       await request(app)
         .patch(`/api/v1/admin/user/${technicianId}/soft-delete`)
         .set(bearer(adminToken))
         .expect(200);
       await login(`technician-${stamp}@fixly.test`).expect(401);
+      const profile = await Profile.findOne({ user_id: technicianId });
+      assert.equal(profile.isDeleted, true);
+      await assertHidden(profile);
+      const details = await request(app)
+        .get(`/api/v1/admin/user/${technicianId}?includeDeleted=true`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal(details.body.data.isDeleted, true);
+      assert.equal(details.body.data.artisanProfile.isDeleted, true);
+      assert.equal(details.body.data.deletedAt, details.body.data.artisanProfile.deletedAt);
+      await request(app)
+        .patch(`/api/v1/admin/user/${technicianId}`)
+        .set(bearer(adminToken))
+        .send({ firstName: "Inactive update" })
+        .expect(404);
       const hidden = await request(app)
         .get("/api/v1/admin/users")
         .set(bearer(adminToken))
@@ -350,6 +541,108 @@ describe("Fixly API", () => {
         .set(bearer(adminToken))
         .expect(200);
       await login(`technician-${stamp}@fixly.test`).expect(200);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, false);
+      await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    });
+
+    it("cascades deletion and restoration for legacy role mismatches", async () => {
+      const { user, profile } = await createArtisan("legacy-role");
+      await User.updateOne({ _id: user._id }, { role: "house_owner" });
+      await assertHidden(profile);
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, true);
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/restore`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, false);
+      await assertHidden(profile);
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal(await Profile.findById(profile._id), null);
+    });
+
+    it("hides a deactivated owner immediately and repairs a failed soft-delete on retry", async (t) => {
+      const { user, profile } = await createArtisan("soft-delete-retry");
+      const fault = t.mock.method(Profile, "updateOne", async () => {
+        throw new Error("simulated profile write failure");
+      });
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+        .set(bearer(adminToken))
+        .expect(500);
+      fault.mock.restore();
+      assert.equal((await Profile.findById(profile._id)).isDeleted, false);
+      const deleted = await User.findById(user._id);
+      assert.equal(deleted.isDeleted, true);
+      await assertHidden(profile);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await request(app)
+          .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+          .set(bearer(adminToken))
+          .expect(200);
+      }
+      const repaired = await Profile.findById(profile._id);
+      assert.equal(repaired.isDeleted, true);
+      assert.equal(repaired.deletedAt.toISOString(), deleted.deletedAt.toISOString());
+    });
+
+    it("repairs a failed restore on retry", async (t) => {
+      const { user, profile } = await createArtisan("restore-retry");
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/soft-delete`)
+        .set(bearer(adminToken))
+        .expect(200);
+      const fault = t.mock.method(Profile, "updateOne", async () => {
+        throw new Error("simulated profile write failure");
+      });
+      await request(app)
+        .patch(`/api/v1/admin/user/${user.id}/restore`)
+        .set(bearer(adminToken))
+        .expect(500);
+      fault.mock.restore();
+      assert.equal((await User.findById(user._id)).isDeleted, false);
+      assert.equal((await Profile.findById(profile._id)).isDeleted, true);
+      await assertHidden(profile);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await request(app)
+          .patch(`/api/v1/admin/user/${user.id}/restore`)
+          .set(bearer(adminToken))
+          .expect(200);
+      }
+      const restored = await Profile.findById(profile._id);
+      assert.equal(restored.isDeleted, false);
+      assert.equal(restored.deletedAt, null);
+      await request(app).get(`/api/v1/artisan/profile/${profile.id}`).expect(200);
+    });
+
+    it("hides orphaned profiles and finishes hard deletion on retry", async (t) => {
+      const { user, profile } = await createArtisan("hard-delete-retry");
+      const fault = t.mock.method(Profile, "deleteOne", async () => {
+        throw new Error("simulated profile delete failure");
+      });
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(500);
+      fault.mock.restore();
+      assert.equal(await User.findById(user._id), null);
+      assert.notEqual(await Profile.findById(profile._id), null);
+      await assertHidden(profile);
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(200);
+      assert.equal(await Profile.findById(profile._id), null);
+      await request(app)
+        .delete(`/api/v1/admin/user/${user.id}`)
+        .set(bearer(adminToken))
+        .expect(404);
     });
 
     it("hard-deletes a user and their profile for good", async () => {
@@ -362,6 +655,16 @@ describe("Fixly API", () => {
       }).expect(201);
       const doomed = await User.findOne({ email: `doomed-${stamp}@fixly.test` });
       const doomedId = doomed._id.toString();
+      const profile = await Profile.create({
+        user_id: doomed._id,
+        professional_headline: "Profile to cascade delete",
+        profession: "Plumber",
+        experience_years: 3,
+        phone_number: "08012345678",
+        starting_price: 5000,
+        residential_address: "12 Allen Ave",
+        office_address: "12 Allen Ave",
+      });
       await request(app)
         .delete(`/api/v1/admin/user/${doomedId}`)
         .set(bearer(adminToken))
@@ -370,6 +673,7 @@ describe("Fixly API", () => {
         .get(`/api/v1/admin/user/${doomedId}`)
         .set(bearer(adminToken))
         .expect(404);
+      assert.equal(await Profile.findById(profile._id), null);
     });
   });
 

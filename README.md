@@ -72,7 +72,7 @@ From `backend`:
 npm test
 ```
 
-The suite (`backend/tests/`) runs with Node's built-in test runner and Supertest against a dedicated `fixly-backend-test` database, so your dev data is untouched.
+The suite (`backend/tests/`) runs with Node's built-in test runner and Supertest. Each integration run creates a unique `fixly-test-<random-id>` database and only drops that database during cleanup. Set `MONGODB_URI_TEST` to select a test server; the database name in that URI is overridden. The default server is `mongodb://127.0.0.1:27017`.
 
 ### Frontend
 
@@ -97,6 +97,15 @@ Open the local URL printed by Vite. To create a production build, run `npm run b
 | `/api/v1/uploads` | Upload images to Cloudinary (auth required) |
 
 Protected endpoints require an `Authorization: Bearer <token>` header.
+
+Public registration accepts only `house_owner` and `artisan` roles. An existing administrator can promote a registered account through `PATCH /api/v1/admin/user/:id`; the first administrator must be provisioned by a trusted database operator.
+
+Profile creation uses the authenticated artisan as its owner. Omit `user_id` from the request body; supplying it returns `400`.
+Ratings are initialized to an empty array by the server. Supplying `rating` when creating or updating a profile returns `400`.
+
+Accounts with an artisan profile, including a soft-deleted profile, must retain the `artisan` role; changing them to another role returns `409`. Public profile reads require an active artisan owner and an active profile. Admin user details with `includeDeleted=true` include deletion metadata and any soft-deleted profile.
+
+User deletion and restoration work with standalone MongoDB. They update the user first, then its profile regardless of the user's current role. These writes are not atomic: if the second write fails, the endpoint returns `500` and the same request can be retried to finish the operation. Public reads hide profiles belonging to deactivated, missing, or non-artisan users, including when a cascade is incomplete. A replica set and transactions are required if atomic multi-document changes become a deployment requirement.
 
 ### Image uploads
 
