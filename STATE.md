@@ -33,14 +33,19 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - [x] Role-independent lifecycle cascades, recovery on retry, and public hiding of inactive or missing owners
 - [x] Accounts with profiles retain the artisan role; admin details include deletion metadata and deleted profiles when requested
 - [x] Generic login failures without internal messages in responses or sensitive details in logs
-- [x] Backend regression suite: 47 passing tests, including concurrent creation and injected lifecycle failures
+- [x] Authenticated GET/PUT/DELETE /api/v1/users/me/avatar for every role, 5MB image limit, per-account upload limits, and 512x512 WEBP conversion
+- [x] Private avatar metadata and revision guards, queued cleanup retries, public avatar URLs, and image cleanup on permanent account deletion
+- [x] Backend regression suite: 80 passing tests, including concurrent creation, avatar changes, multipart limits, and injected lifecycle failures
 
 ## What Is Next
 - [ ] Review existing administrator memberships and previously supplied ratings; no automatic data cleanup was performed
 - [ ] Adopt a replica set and transactions if atomic lifecycle changes become required
+- [ ] Configure valid Cloudinary credentials and verify a real upload; avatar tests currently mock provider calls
 - [ ] `braces` dev-only advisory via nodemon has no upstream fix; revisit when fixed
 
 ## Known Gotchas & Constraints
 - Profile creation clients must omit user_id and rating; either field causes a 400 response.
 - Cascades can partially complete on standalone MongoDB; retry the same operation after a 500 response to finish synchronization.
 - User email and profile owner uniqueness remain global, including soft-deleted records, preserving restoration without identity reuse.
+- Avatar cleanup is retried on the next avatar change or permanent deletion, with no background worker. If both database persistence and cleanup cannot complete, the uploaded public ID is logged for recovery.
+- Avatar DELETE can return 503 with avatar already null when provider cleanup is pending; repeat the request to finish cleanup.
