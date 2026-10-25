@@ -16,7 +16,13 @@ const destroyImage = async (publicId) => {
 const logPending = (publicId) => console.error("Avatar cleanup pending:", publicId);
 
 export const cleanupAvatarImages = async (userId) => {
-  const user = await User.findById(userId).select("+avatar.publicId +avatarCleanup");
+  let user;
+  try {
+    user = await User.findById(userId).select("+avatar.publicId +avatarCleanup");
+  } catch {
+    console.error("Avatar cleanup could not load account:", userId.toString());
+    return false;
+  }
   if (!user) return true;
 
   let complete = true;
