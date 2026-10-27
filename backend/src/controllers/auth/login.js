@@ -16,8 +16,8 @@ export const login = async (req, res) => {
         }
 
         //step 2: find user (hide existence + soft-deleted accounts)
-        const user = await User.findOne({ email: email.toLowerCase().trim() });
-        if (!user || user.isDeleted) {
+        const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+passwordByteLimit");
+        if (!user || user.isDeleted || (user.passwordByteLimit === 72 && bcrypt.truncates(password))) {
             return res.status(401).json({
                 statusCode: 401,
                 success: false,

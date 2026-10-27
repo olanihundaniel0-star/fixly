@@ -176,6 +176,24 @@ describe("avatar image storage", () => {
 });
 
 describe("avatar API", () => {
+  it("rejects retired general uploads without calling image storage", async (t) => {
+    const storage = mockCloudinary(t);
+    const user = await createUser();
+    await request(app).post("/api/v1/uploads/image").set(auth(user))
+      .attach("image", image, "unused.png").expect(410);
+    assert.equal(storage.uploaded.length, 0);
+    assert.equal((await User.findById(user._id)).avatar, null);
+  });
+
+  it("rejects multipart fields before starting an avatar upload", async (t) => {
+    const storage = mockCloudinary(t);
+    const user = await createUser();
+    await request(app).put("/api/v1/users/me/avatar").set(auth(user))
+      .field("unused", "x".repeat(64 * 1024))
+      .attach("image", image, "avatar.png").expect(400);
+    assert.equal(storage.uploaded.length, 0);
+  });
+
   it("requires authentication before reading, uploading, or deleting", async (t) => {
     const storage = mockCloudinary(t);
     await request(app).get("/api/v1/users/me/avatar").expect(401);

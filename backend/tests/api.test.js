@@ -86,6 +86,35 @@ describe("Fixly API", () => {
     assert.ok(res.body.errors.length > 0);
   });
 
+  it("rejects passwords exceeding bcrypt's byte limit without creating accounts", async () => {
+    const passwords = ["Aa1" + "x".repeat(70), "Aa1" + "é".repeat(35)];
+    for (const [index, password] of passwords.entries()) {
+      const email = `oversize-password-${stamp}-${index}@fixly.test`;
+      const res = await register({ firstName: "Long", lastName: "Password", email, password }).expect(400);
+      assert.ok(res.body.errors.some((message) => message.includes("72 UTF-8 bytes")));
+      assert.equal(await User.exists({ email }), null);
+    }
+  });
+
+  it("accepts a 72-byte password and checks its last byte on login", async () => {
+    const email = `password-boundary-${stamp}@fixly.test`;
+    const password = "Aa1" + "x".repeat(69);
+    await register({ firstName: "Boundary", lastName: "Password", email, password }).expect(201);
+    await login(email, password).expect(200);
+    await login(email, password.slice(0, -1) + "y").expect(401);
+    await login(email, password + "ignored-suffix").expect(401);
+  });
+
+  it("preserves login for legacy accounts with passwords longer than 72 bytes", async () => {
+    const email = `legacy-password-${stamp}@fixly.test`;
+    const password = "Aa1" + "x".repeat(75);
+    await User.create({
+      firstName: "Legacy", lastName: "Password", email,
+      password: await bcrypt.hash(password, 4),
+    });
+    await login(email, password).expect(200);
+  });
+
   it("rejects public admin registration without creating an account", async () => {
     const email = `public-admin-${stamp}@fixly.test`;
     await register({
@@ -328,6 +357,22 @@ describe("Fixly API", () => {
         });
     });
 
+    it("rejects malformed and repeated list queries with 400", async () => {
+      for (const query of [
+        "search=one&search=two", "profession=Plumber&profession=Painter",
+        "sortBy=createdAt&sortBy=starting_price", "order=asc&order=desc",
+        `search=${"x".repeat(201)}`, `page=${"9".repeat(400)}`,
+        "page=1000001", "page=1.5", "page=1&page=2", "limit=10junk",
+        "limit=1&limit=2", "limit=", "page=9007199254740992",
+      ]) {
+        const res = await request(app).get(`/api/v1/artisan/profiles?${query}`).expect(400);
+        assert.equal(res.body.success, false);
+        assert.equal(res.body.error, undefined);
+      }
+      await request(app).get("/api/v1/artisan/profiles?page=1&limit=999")
+        .expect(200).expect((res) => assert.equal(res.body.meta.limit, 100));
+    });
+
     it("returns 400 for invalid profile ids", async () => {
       await request(app)
         .get("/api/v1/artisan/profile/not-an-objectid")
@@ -439,6 +484,14 @@ describe("Fixly API", () => {
         .get("/api/v1/admin/users")
         .set(bearer(adminToken))
         .expect(200);
+    });
+
+    it("validates pagination on admin lists before querying MongoDB", async () => {
+      for (const query of ["page=1000001", "page=1&page=2", "limit=NaN", `page=${"9".repeat(400)}`]) {
+        await request(app).get(`/api/v1/admin/users?${query}`).set(bearer(adminToken)).expect(400);
+      }
+      await request(app).get("/api/v1/admin/users?page=1&limit=999").set(bearer(adminToken))
+        .expect(200).expect((res) => assert.equal(res.body.meta.limit, 100));
     });
 
     it("fetches a single user with their artisan profile", async () => {
@@ -691,7 +744,7 @@ describe("Fixly API", () => {
         .expect(401);
     });
 
-    it("returns 503 while Cloudinary is not configured", async () => {
+    it("retires unattached uploads even while Cloudinary is not configured", async () => {
       const token = (await login(`owner-${stamp}@fixly.test`)).body.data.token;
       const saved = Object.fromEntries(
         cloudinaryKeys.map((key) => [key, process.env[key]]),
@@ -702,9 +755,9 @@ describe("Fixly API", () => {
           .post("/api/v1/uploads/image")
           .set(bearer(token))
           .attach("image", Buffer.from("not a real image"), "test.jpg")
-          .expect(503)
+          .expect(410)
           .expect((r) =>
-            assert.match(r.body.message, /not configured/i),
+            assert.match(r.body.message, /PUT \/api\/v1\/users\/me\/avatar/),
           );
       } finally {
         cloudinaryKeys.forEach((key) => {

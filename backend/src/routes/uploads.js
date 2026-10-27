@@ -1,27 +1,14 @@
 import express from "express";
 import { requireAuth } from "../middleware/authentication.js";
-import { uploadImage } from "../middleware/upload.js";
 
 const router = express.Router();
 
-// POST /api/v1/uploads/image — multipart/form-data with field `image` (jpeg/png/webp, <=5MB)
-router.post("/image", requireAuth, uploadImage("image"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      statusCode: 400,
-      success: false,
-      message: "No image provided (multipart field: image)",
-    });
-  }
-  return res.status(201).json({
-    statusCode: 201,
-    success: true,
-    message: "Image uploaded successfully",
-    data: {
-      url: req.file.path,
-      publicId: req.file.filename,
-      bytes: req.file.size,
-    },
+// Retired: uploads must be attached to an account so they can be cleaned up.
+router.post("/image", requireAuth, (req, res) => {
+  return res.status(410).json({
+    statusCode: 410,
+    success: false,
+    message: "General image uploads have been retired. Use PUT /api/v1/users/me/avatar for profile pictures.",
   });
 });
 

@@ -17,6 +17,8 @@ const userSchema = new mongoose.Schema({
         match: [/^\S+@\S+\.\S+$/, "Please provide a valid email"],
     },
     password: {type: String, required: true, minlength: 10, maxlength: 100 },
+    // Missing on legacy accounts, whose original password length is unknown.
+    passwordByteLimit: { type: Number, enum: [72], select: false },
     role: {
         type: String,
         required: true,
