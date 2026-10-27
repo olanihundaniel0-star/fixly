@@ -24,6 +24,7 @@ export const register = async (req, res) => {
             lastName,
             email,
             password: hashedPassword,
+            passwordByteLimit: 72,
             role,
         });
 

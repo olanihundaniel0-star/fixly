@@ -7,13 +7,6 @@ import { discardAvatarUpload } from "../services/avatarImages.js";
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: () => process.env.CLOUDINARY_FOLDER || "fixly",
-  },
-});
-
 const filterImage = (req, file, cb) => {
     if (!IMAGE_TYPES.includes(file.mimetype)) {
       const error = new Error("Only JPEG, PNG or WEBP images are allowed");
@@ -22,12 +15,6 @@ const filterImage = (req, file, cb) => {
     }
     return cb(null, true);
 };
-
-const multerInstance = multer({
-  storage,
-  fileFilter: filterImage,
-  limits: { fileSize: MAX_FILE_SIZE },
-});
 
 const upload = (handler) => (req, res, next) => {
   if (!isCloudinaryConfigured()) {
@@ -39,12 +26,6 @@ const upload = (handler) => (req, res, next) => {
   }
   return handler(req, res, (error) => (error ? next(error) : next()));
 };
-
-export const uploadImage = (fieldName = "image") =>
-  upload(multerInstance.single(fieldName));
-
-export const uploadImages = (fieldName = "images", maxCount = 5) =>
-  upload(multerInstance.array(fieldName, maxCount));
 
 const avatarStorage = new CloudinaryStorage({
   cloudinary,
@@ -66,7 +47,5 @@ avatarStorage._removeFile = (req, file, callback) => {
 export const uploadAvatar = upload(multer({
   storage: avatarStorage,
   fileFilter: filterImage,
-  limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 0 },
+  limits: { fileSize: MAX_FILE_SIZE, files: 1, fields: 0, parts: 1 },
 }).single("image"));
-
-export default multerInstance;

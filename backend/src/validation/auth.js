@@ -1,4 +1,5 @@
 import Joi from "joi";
+import bcrypt from "bcryptjs";
 import { PROFESSIONS } from "../constants/professions.js";
 
 const registerValidationSchema = Joi.object({
@@ -13,6 +14,9 @@ const registerValidationSchema = Joi.object({
     .min(10)
     .max(100)
     .required()
+    .custom((value, helpers) => bcrypt.truncates(value)
+      ? helpers.message("Password must not exceed 72 UTF-8 bytes")
+      : value)
     .pattern(new RegExp("^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9]).{10,100}$")),
   confirmPassword: Joi.any().valid(Joi.ref("password")).messages({
     "any.only": "Passwords do not match",

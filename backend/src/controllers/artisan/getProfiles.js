@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Profile from "../../models/artisanProfile.js";
 import User from "../../models/users.js";
 import { PROFESSIONS } from "../../constants/professions.js";
-import { handleMongooseError } from "../../utils/errors.js";
+import { handleMongooseError, QueryValidationError } from "../../utils/errors.js";
 import {
   parsePagination,
   paginationMeta,
@@ -13,6 +13,15 @@ const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const getProfiles = async (req, res) => {
   try {
     const { limit, page, skip } = parsePagination(req.query);
+
+    for (const key of ["search", "profession", "sortBy", "order"]) {
+      if (req.query[key] !== undefined && typeof req.query[key] !== "string") {
+        throw new QueryValidationError(`${key} must be a single string`);
+      }
+    }
+    if (req.query.search?.length > 200) {
+      throw new QueryValidationError("search must not exceed 200 characters");
+    }
 
     const filter = { isDeleted: { $ne: true } };
 

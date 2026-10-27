@@ -6,7 +6,16 @@ export const isCastError = (error) => error?.name === "CastError";
 
 const isProduction = () => process.env.NODE_ENV === "production";
 
+export class QueryValidationError extends Error {}
+
 export const handleMongooseError = (res, error) => {
+  if (error instanceof QueryValidationError) {
+    return res.status(400).json({
+      statusCode: 400,
+      success: false,
+      message: error.message,
+    });
+  }
   if (isDuplicateKey(error)) {
     return res.status(409).json({
       statusCode: 409,

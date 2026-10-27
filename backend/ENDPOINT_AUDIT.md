@@ -29,7 +29,8 @@ User (src/models/users.js):
 - firstName: string, required
 - lastName: string, required
 - email: string, required, unique, valid email
-- password: string, required, min 10 / max 100 chars; registration validation additionally requires lowercase, uppercase and a digit
+- password: stored bcrypt hash, required. Registration accepts at least 10 characters and at most 72 UTF-8 bytes, with lowercase, uppercase and a digit.
+- passwordByteLimit: internal password policy marker, excluded from normal queries. New registrations store 72; login rejects longer candidates for these accounts.
 - role: string, required, house_owner (default), artisan, admin
 - isDeleted: boolean, default false, indexed (soft-delete flag)
 - deletedAt: Date, default null (soft-delete timestamp)
@@ -70,10 +71,15 @@ ArtisanProfile (src/models/artisanProfile.js):
 - GET /api/v1/users/me/avatar - Return the authenticated user's avatar as { url } or null. 200 on success, 401 unauthenticated or deactivated account.
 - PUT /api/v1/users/me/avatar - Add or replace the authenticated user's avatar. Multipart field image, one JPEG/PNG/WEBP file up to 5MB, no extra fields. Cloudinary validates the input and produces a 512x512 WEBP image. 201 first upload, 200 replacement, 400 invalid multipart/image, 401 unauthenticated, 409 stale account/avatar revision, 413 file too large, 429 more than 10 upload attempts in 15 minutes per account, 503 missing storage configuration or provider authentication/availability failures. Provider messages are not exposed to clients.
 - DELETE /api/v1/users/me/avatar - Clear the authenticated user's avatar and delete its image plus any pending cleanup images. 200 with avatar null, including repeats; 401 unauthenticated; 409 stale account/avatar revision; 503 if cleanup is pending. On 503 the avatar is already null; repeat the same request to finish cleanup.
+- POST /api/v1/uploads/image - Retired. Returns 401 without authentication or 410 with instructions to use PUT /api/v1/users/me/avatar. Does not parse multipart data or contact image storage.
 - PATCH /api/v1/users/:id - Update own name by user _id. Allowed: firstName, lastName. 400 invalid id / empty body / no allowed fields, 404 not found. Requires Bearer auth; self or admin.
 - All unmatched routes - 404 { statusCode: 404, success: false, message: "Route not found" }.
 
 Lifecycle writes support standalone MongoDB and are non-atomic. A failure returns 500; retrying the same request finishes the profile update or cleanup. Public profile reads independently require an active artisan owner, so failed cascades do not expose profiles of deactivated or missing users.
+
+List pagination accepts single integer query values only. Missing page/limit default to 1/20; nonpositive values still clamp to 1 and limits above 100 clamp to 100. Repeated, malformed, or unsafe integers and pages above 1,000,000 return 400. Artisan search accepts one string of at most 200 characters; repeated search/profession/sortBy/order parameters return 400.
+
+Legacy accounts without passwordByteLimit retain their existing login behavior to avoid locking out users. Their original password length cannot be recovered from bcrypt hashes; resolving historical truncation requires a separate password reset/migration. Previously uploaded general images have no recorded ownership and require a separate Cloudinary inventory and cleanup. Retiring the endpoint prevents new untracked assets; it does not delete existing provider assets.
 
 Avatar changes use a conditional user update and an internal revision counter to reject conflicting uploads or removals. Old-image cleanup is queued in the same user update that changes the avatar. A successful replacement is retained if only old-image cleanup fails; queued cleanup is retried on subsequent avatar changes and permanent account deletion. Soft deletion preserves avatar images. Cloudinary and MongoDB changes are not one atomic transaction, and cleanup has no background worker. If MongoDB is unavailable while recording an unattached upload, its public ID is logged for manual recovery.
 
@@ -83,7 +89,7 @@ POST /api/v1/auth/register (Joi: registerValidationSchema):
 - firstName: string, trimmed, required
 - lastName: string, trimmed, required
 - email: string, trimmed, lowercased, valid email, required
-- password: string, required, 10-100 chars, must contain lowercase, uppercase and a digit
+- password: string, required, at least 10 characters and at most 72 UTF-8 bytes, must contain lowercase, uppercase and a digit
 - confirmPassword: must match password when provided
 - role: "house_owner" | "artisan", default "house_owner"; public admin registration is rejected
 - Unknown fields are stripped.
