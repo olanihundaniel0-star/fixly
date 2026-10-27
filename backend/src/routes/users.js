@@ -1,5 +1,6 @@
 import express from "express";
 import { updateMe } from "../controllers/users/updateMe.js";
+import { getMe } from "../controllers/users/getMe.js";
 import { requireAuth, requireOwnership } from "../middleware/authentication.js";
 import User from "../models/users.js";
 import rateLimit from "express-rate-limit";
@@ -21,6 +22,7 @@ const avatarLimiter = rateLimit({
   },
 });
 
+router.get("/me", requireAuth, getMe);
 router.get("/me/avatar", requireAuth, getAvatar);
 router.put("/me/avatar", requireAuth, avatarLimiter, uploadAvatar, putAvatar);
 router.delete("/me/avatar", requireAuth, deleteAvatar);

@@ -94,7 +94,7 @@ Open the local URL printed by Vite. To create a production build, run `npm run b
 | `/api/v1/artisan` | Create, browse, and update artisan profiles |
 | `/api/v1/users` | Update your user account and manage your avatar |
 | `/api/v1/admin` | Manage users as an administrator |
-| `/api/v1/uploads` | Upload images to Cloudinary (auth required) |
+| `/api/v1/uploads` | Retired general upload endpoint; authenticated requests return 410 |
 
 Protected endpoints require an `Authorization: Bearer <token>` header.
 
@@ -105,11 +105,15 @@ Ratings are initialized to an empty array by the server. Supplying `rating` when
 
 Accounts with an artisan profile, including a soft-deleted profile, must retain the `artisan` role; changing them to another role returns `409`. Public profile reads require an active artisan owner and an active profile. Admin user details with `includeDeleted=true` include deletion metadata and any soft-deleted profile.
 
-User deletion and restoration work with standalone MongoDB. They update the user first, then its profile regardless of the user's current role. These writes are not atomic: if the second write fails, the endpoint returns `500` and the same request can be retried to finish the operation. Public reads hide profiles belonging to deactivated, missing, or non-artisan users, including when a cascade is incomplete. A replica set and transactions are required if atomic multi-document changes become a deployment requirement.
+Personal and professional profiles remain separate. `GET /api/v1/users/me` returns the authenticated account's personal data; `PATCH /api/v1/users/:id` updates its names. `GET /api/v1/artisan/profile/me` returns the authenticated artisan's complete professional profile, including their own phone and addresses; `PATCH /api/v1/artisan/profile/:id` updates professional fields only. Public profile reads always omit phone and addresses.
+
+User deletion, soft deletion, and restoration retain their existing URLs and share one coordinator. A MongoDB lock keyed by account id prevents overlapping lifecycle actions across API processes; conflicts return `409`. Different accounts can proceed independently. Standalone MongoDB remains supported. Writes to the user and profile are still non-atomic: ordinary application failures release the lock and a retry finishes synchronization. Database driver errors retain the lock because a write outcome may be unknown. Public reads independently hide profiles of inactive or missing owners.
+
+Locks do not expire automatically. A process crash, database driver error, or unavailable database during lock release can leave a persistent lock that requires operator recovery. See [account lifecycle and recovery](backend/ACCOUNT_LIFECYCLE.md) before clearing one. Administrator self-demotion/deletion policy remains unchanged; frontend confirmation is deferred and does not prevent direct API calls.
 
 ### Image uploads
 
-Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env` to enable uploads. While they are missing, upload endpoints respond with `503`. Accepted format: `POST /api/v1/uploads/image` as `multipart/form-data` with an `image` field (JPEG/PNG/WEBP, up to 5MB); the response returns the Cloudinary `url` and `publicId`.
+`POST /api/v1/uploads/image` is retired: unauthenticated requests return `401`, authenticated requests return `410`, and no file is uploaded. Use the account avatar endpoint below. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env` to enable avatar uploads; missing storage configuration returns `503`.
 
 ### User profile pictures
 
@@ -131,10 +135,18 @@ curl -X PUT http://localhost:5000/api/v1/users/me/avatar \
 
 The server saves the new image before removing the previous one. A failed database save or a conflicting account change triggers cleanup of the unattached upload. Concurrent changes return `409`; reload the avatar before retrying. Existing accounts need no data migration.
 
-Cloudinary public IDs, avatar revisions, and pending cleanup records remain internal. Login and admin responses include `avatar`, and public artisan responses include it under `user_id.avatar`. A missing picture is represented by `null`, allowing clients to display a default image. The generic `/uploads/image` endpoint only uploads an image; use the avatar routes to attach a picture to an account.
+Cloudinary public IDs, avatar revisions, and pending cleanup records remain internal. Login and admin responses include `avatar`, and public artisan responses include it under `user_id.avatar`. A missing picture is represented by `null`, allowing clients to display a default image. General image uploads are retired; avatar routes attach pictures to accounts and track their cleanup.
 
 Failed cleanup is retained on the account and retried during the next avatar change or permanent account deletion. Replacing a picture still succeeds if only the previous image's cleanup fails. Deleting a picture returns `503` if external cleanup is pending; the account already has `avatar: null`, and repeating DELETE finishes cleanup. If MongoDB is unavailable while an unattached upload needs cleanup, the server logs its public ID for recovery. There is no background cleanup worker.
 
 Soft deletion retains pictures for restoration. Permanent deletion first deactivates the account and removes its current and pending avatar images; if Cloudinary cleanup fails, it returns `503` and retains the deactivated account for retry.
 
 Cloudinary configuration is checked for presence at startup. The configured cloud name, API key, and API secret must also be valid for real uploads. Avatar tests exercise multipart requests and MongoDB persistence with the Cloudinary upload and deletion methods mocked, so they do not upload files to a real cloud account.
+
+### Validation and legacy data
+
+New registrations require at least 10 password characters and at most 72 UTF-8 bytes, with uppercase, lowercase, and a digit. Login enforces the byte limit for new accounts; legacy accounts retain login compatibility until a separate password reset migration. Existing general uploads have no recorded owner and require a separate Cloudinary inventory and cleanup.
+
+Pagination accepts single safe-integer values only. Page defaults to 1 and cannot exceed 1,000,000; limit defaults to 20 and clamps to 1–100. Nonpositive page/limit values clamp to 1. Malformed or repeated pagination values return `400`. Artisan search accepts one string of at most 200 characters.
+
+The canonical API reference is [backend/ENDPOINT_AUDIT.md](backend/ENDPOINT_AUDIT.md).

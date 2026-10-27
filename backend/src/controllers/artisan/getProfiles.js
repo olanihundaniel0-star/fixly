@@ -10,6 +10,23 @@ import {
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+export const getMyProfile = async (req, res) => {
+  try {
+    const profile = await Profile.findOne({ user_id: req.user._id, isDeleted: { $ne: true } });
+    if (!profile) {
+      return res.status(404).json({ statusCode: 404, success: false, message: "Artisan profile not found" });
+    }
+    return res.status(200).json({
+      statusCode: 200,
+      success: true,
+      message: "Your artisan profile retrieved successfully",
+      data: profile,
+    });
+  } catch (error) {
+    return handleMongooseError(res, error);
+  }
+};
+
 export const getProfiles = async (req, res) => {
   try {
     const { limit, page, skip } = parsePagination(req.query);

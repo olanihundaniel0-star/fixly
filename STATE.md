@@ -7,7 +7,7 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - Soft deletion implemented using `isDeleted` and `deletedAt` flags on `User` and `Profile` collections.
 - Role-based separation (`house_owner`, `artisan`, `admin`) requires authentication and authorization middleware prior to production exposure.
 - Public registration only permits house_owner and artisan; administrators are provisioned by a trusted operator or promoted through existing admin-only routes.
-- Standalone MongoDB remains supported. User/profile lifecycle writes are non-atomic and repeatable; public reads independently require an active artisan owner.
+- Standalone MongoDB remains supported. Lifecycle endpoints share a per-account MongoDB lock across API processes; user/profile writes remain non-atomic and repeatable. Public reads independently require an active artisan owner.
 
 ## What Is Done
 - [x] Initial Express server setup and MongoDB connection
@@ -25,7 +25,7 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - [x] Soft-deleted profiles/users blocked from update + profile creation (`isDeleted` checks)
 - [x] Shared pagination util, shared PROFESSIONS constant, prod-safe error responses
 - [x] Upload toolchain installed: multer 2.5 + multer-storage-cloudinary 4 + cloudinary 2.11 (`backend/.npmrc` pins legacy-peer-deps since MSC still declares peer cloudinary ^1; runtime-compatible with v2 — only uses `uploader.upload_stream`/`destroy`)
-- [x] Cloudinary config + multer middleware + `POST /api/v1/uploads/image` (Bearer, image-only, 5MB cap, 503 when unconfigured, JSON error mapping)
+- [x] Cloudinary avatar uploads with bounded multipart parsing; generic `POST /api/v1/uploads/image` retired with authenticated 410 responses
 - [x] Public admin registration rejected; existing admin role management retained
 - [x] Profile ownership derived from req.user._id; user_id rejected in creation requests
 - [x] Client-supplied ratings rejected on creation and update; new profiles start with []
@@ -35,17 +35,25 @@ Comprehensive code review and architectural hardening of the Fixly backend API (
 - [x] Generic login failures without internal messages in responses or sensitive details in logs
 - [x] Authenticated GET/PUT/DELETE /api/v1/users/me/avatar for every role, 5MB image limit, per-account upload limits, and 512x512 WEBP conversion
 - [x] Private avatar metadata and revision guards, queued cleanup retries, public avatar URLs, and image cleanup on permanent account deletion
-- [x] Backend regression suite: 80 passing tests, including concurrent creation, avatar changes, multipart limits, and injected lifecycle failures
+- [x] Backend regression suite: 101 tests covering concurrent creation, avatar changes, multipart limits, lifecycle conflicts/retries, and separate personal/professional reads
+- [x] Patched body-parser to 2.4.0; bounded password bytes for new accounts and validated list queries
+- [x] GET /api/v1/users/me and GET /api/v1/artisan/profile/me preserve separate account/professional views
+- [x] Shared MongoDB lifecycle coordinator rejects concurrent delete/soft-delete/restore operations with 409
 
 ## What Is Next
 - [ ] Review existing administrator memberships and previously supplied ratings; no automatic data cleanup was performed
 - [ ] Adopt a replica set and transactions if atomic lifecycle changes become required
 - [ ] Configure valid Cloudinary credentials and verify a real upload; avatar tests currently mock provider calls
-- [ ] `braces` dev-only advisory via nodemon has no upstream fix; revisit when fixed
+- [ ] Frontend confirmation for destructive admin actions (deferred); backend last-admin guard remains absent by product direction
+- [ ] Password reset migration for legacy bcrypt accounts and inventory of historical untracked images
+- [ ] Build the product frontend and contact/hiring workflows; frontend currently remains a Vite starter
 
 ## Known Gotchas & Constraints
 - Profile creation clients must omit user_id and rating; either field causes a 400 response.
-- Cascades can partially complete on standalone MongoDB; retry the same operation after a 500 response to finish synchronization.
+- Cascades can partially complete on standalone MongoDB; retry the same operation after an application error. A database driver error can retain a lock and requires recovery before retry.
 - User email and profile owner uniqueness remain global, including soft-deleted records, preserving restoration without identity reuse.
 - Avatar cleanup is retried on the next avatar change or permanent deletion, with no background worker. If both database persistence and cleanup cannot complete, the uploaded public ID is logged for recovery.
 - Avatar DELETE can return 503 with avatar already null when provider cleanup is pending; repeat the request to finish cleanup.
+
+- Lifecycle locks do not expire automatically. A crashed operation or uncertain database write requires operator recovery after confirming the owning process has stopped. See [backend/ACCOUNT_LIFECYCLE.md](backend/ACCOUNT_LIFECYCLE.md).
+- Keep personal profile editing separate from professional profile editing; lifecycle actions affect both records.
