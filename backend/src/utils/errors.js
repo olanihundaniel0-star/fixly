@@ -8,7 +8,20 @@ const isProduction = () => process.env.NODE_ENV === "production";
 
 export class QueryValidationError extends Error {}
 
+export class AccountLifecycleConflictError extends Error {
+  constructor() {
+    super("Another account lifecycle operation is in progress. Retry after it finishes.");
+  }
+}
+
 export const handleMongooseError = (res, error) => {
+  if (error instanceof AccountLifecycleConflictError) {
+    return res.status(409).json({
+      statusCode: 409,
+      success: false,
+      message: error.message,
+    });
+  }
   if (error instanceof QueryValidationError) {
     return res.status(400).json({
       statusCode: 400,

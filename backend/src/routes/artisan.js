@@ -1,6 +1,6 @@
 import express from "express"
 import { createProfile } from "../controllers/artisan/profile.js"
-import { getProfileById, getProfiles } from "../controllers/artisan/getProfiles.js"
+import { getMyProfile, getProfileById, getProfiles } from "../controllers/artisan/getProfiles.js"
 import { updateProfile } from "../controllers/artisan/updateProfile.js"
 import { validateProfileCreate, validateProfileUpdate } from "../middleware/validation.js"
 import Profile from "../models/artisanProfile.js"
@@ -19,6 +19,7 @@ const requireProfileOwner = requireOwnership({
 
 router.post("/profile", requireAuth, requireRole("artisan"), validateProfileCreate, createProfile)
 router.get("/profiles", optionalAuth, getProfiles)
+router.get("/profile/me", requireAuth, requireRole("artisan"), getMyProfile)
 router.get("/profile/:id", optionalAuth, getProfileById)
 router.patch("/profile/:id", requireAuth, requireProfileOwner, validateProfileUpdate, updateProfile)
 
